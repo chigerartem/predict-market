@@ -36,8 +36,19 @@ const en = {
   // ── Навигация (App) ────────────────────────────────────────────────────
   "nav.home": "Home",
   "nav.trading": "Calculator",
+  "nav.bets": "Bets",
   "nav.community": "Community",
   "nav.profile": "Profile",
+
+  "bets.title": "My bets",
+  "bets.empty": "No bets yet",
+  "bets.emptyHint": "Pick an event on the home screen",
+  "bets.statusPlaced": "Active",
+  "bets.statusWon": "Won",
+  "bets.statusLost": "Lost",
+  "bets.statusVoid": "Refunded",
+  "bets.stake": "Stake",
+  "bets.toWin": "To win",
   "app.loadError":
     "Loading error: {error}. Open the app from the bot — the request won't go through without Telegram authorization.",
 
@@ -308,8 +319,19 @@ const ru: Record<TKey, string> = {
   // ── Навигация (App) ────────────────────────────────────────────────────
   "nav.home": "Главная",
   "nav.trading": "Калькулятор",
+  "nav.bets": "Ставки",
   "nav.community": "Комьюнити",
   "nav.profile": "Профиль",
+
+  "bets.title": "Мои ставки",
+  "bets.empty": "Ставок пока нет",
+  "bets.emptyHint": "Выберите событие на главной",
+  "bets.statusPlaced": "Активна",
+  "bets.statusWon": "Выиграла",
+  "bets.statusLost": "Проиграла",
+  "bets.statusVoid": "Возврат",
+  "bets.stake": "Ставка",
+  "bets.toWin": "Выплата",
   "app.loadError":
     "Ошибка загрузки: {error}. Откройте приложение из бота — без авторизации Telegram запрос не пройдёт.",
 

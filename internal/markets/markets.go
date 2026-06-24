@@ -148,15 +148,13 @@ func UpsertExternal(ctx context.Context, pool *pgxpool.Pool, source, sourceID, t
 
 // CloseStaleExternal closes (status CLOSED) external markets of the given source
 // whose source_id is NOT in activeIDs — i.e. they dropped out of the latest ingest
-// (volume fell below threshold, or they closed upstream). Existing bets are left
-// alone (they settle on resolution); the market just stops accepting new ones.
+// (volume fell below threshold, or they closed upstream). The market leaves the
+// public feed and stops accepting new bets. Existing bets keep their escrow and
+// settle on resolution; the user still sees them under "My bets".
 func CloseStaleExternal(ctx context.Context, pool *pgxpool.Pool, source string, activeIDs []string) (int64, error) {
 	ct, err := pool.Exec(ctx,
 		`UPDATE markets SET status = 'CLOSED', updated_at = now()
-		  WHERE source = $1 AND status = 'OPEN' AND NOT (source_id = ANY($2))
-		    AND NOT EXISTS (
-		      SELECT 1 FROM bets b WHERE b.market_id = markets.id AND b.status = 'PLACED'
-		    )`,
+		  WHERE source = $1 AND status = 'OPEN' AND NOT (source_id = ANY($2))`,
 		source, activeIDs)
 	if err != nil {
 		return 0, err

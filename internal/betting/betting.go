@@ -27,17 +27,20 @@ var (
 	ErrLimitExceeded   = errors.New("betting: outcome liability limit exceeded")
 )
 
-// Bet is a placed bet.
+// Bet is a placed bet. MarketTitle/OutcomeTitle are filled by ListUserBets (joined
+// for display); PlaceBet leaves them empty (the client already has them).
 type Bet struct {
-	ID         int64
-	UserID     int64
-	MarketID   int64
-	OutcomeID  int64
-	StakeNano  int64
-	OddsMilli  int64
-	PayoutNano int64
-	Status     string
-	PlacedAt   time.Time
+	ID           int64
+	UserID       int64
+	MarketID     int64
+	OutcomeID    int64
+	StakeNano    int64
+	OddsMilli    int64
+	PayoutNano   int64
+	Status       string
+	PlacedAt     time.Time
+	MarketTitle  string
+	OutcomeTitle string
 }
 
 // payoutNano = floor(stake * oddsMilli / 1000), computed in big.Int to avoid overflow.
@@ -380,8 +383,12 @@ func VoidMarket(ctx context.Context, pool *pgxpool.Pool, marketID int64) error {
 // ListUserBets returns a user's bets, newest first.
 func ListUserBets(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]Bet, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT id, user_id, market_id, outcome_id, stake_nano, odds_milli, payout_nano, status, placed_at
-		   FROM bets WHERE user_id = $1 ORDER BY placed_at DESC`, userID)
+		`SELECT b.id, b.user_id, b.market_id, b.outcome_id, b.stake_nano, b.odds_milli,
+		        b.payout_nano, b.status, b.placed_at, m.title, o.title
+		   FROM bets b
+		   JOIN markets m ON m.id = b.market_id
+		   JOIN outcomes o ON o.id = b.outcome_id
+		  WHERE b.user_id = $1 ORDER BY b.placed_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +397,8 @@ func ListUserBets(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]Bet,
 	for rows.Next() {
 		var b Bet
 		if err := rows.Scan(&b.ID, &b.UserID, &b.MarketID, &b.OutcomeID,
-			&b.StakeNano, &b.OddsMilli, &b.PayoutNano, &b.Status, &b.PlacedAt); err != nil {
+			&b.StakeNano, &b.OddsMilli, &b.PayoutNano, &b.Status, &b.PlacedAt,
+			&b.MarketTitle, &b.OutcomeTitle); err != nil {
 			return nil, err
 		}
 		out = append(out, b)

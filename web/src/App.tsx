@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type SVGProps } from "react";
 import { getMe, markOnboarded, type MeResponse } from "./api";
 import Home from "./tabs/Home";
-import Trading from "./tabs/Trading";
+import MyBets from "./tabs/MyBets";
 import Community from "./tabs/Community";
 import Profile from "./tabs/Profile";
 import Onboarding from "./components/Onboarding";
 import { useT, type TKey } from "./i18n";
 
-type Tab = "home" | "trading" | "community" | "profile";
+type Tab = "home" | "bets" | "community" | "profile";
 type IconFC = (p: SVGProps<SVGSVGElement>) => JSX.Element;
 
 const IconStroke = (props: SVGProps<SVGSVGElement>) => (
@@ -28,10 +28,10 @@ const HomeIcon: IconFC = (p) => (
     <path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9" />
   </IconStroke>
 );
-const TradingIcon: IconFC = (p) => (
+const BetsIcon: IconFC = (p) => (
   <IconStroke {...p}>
-    <path d="M3 17l6-6 4 4 8-9" />
-    <path d="M14 6h7v7" />
+    <path d="M5 3.5h14v17l-2.5-1.5L14 20.5l-2-1.5-2 1.5-2.5-1.5L5 20.5z" />
+    <path d="M9 8.5h6M9 12.5h4" />
   </IconStroke>
 );
 const CommunityIcon: IconFC = (p) => (
@@ -51,7 +51,7 @@ const ProfileIcon: IconFC = (p) => (
 
 const TABS: { id: Tab; labelKey: TKey; Icon: IconFC }[] = [
   { id: "home",      labelKey: "nav.home",      Icon: HomeIcon },
-  { id: "trading",   labelKey: "nav.trading",   Icon: TradingIcon },
+  { id: "bets",      labelKey: "nav.bets",      Icon: BetsIcon },
   { id: "community", labelKey: "nav.community", Icon: CommunityIcon },
   { id: "profile",   labelKey: "nav.profile",   Icon: ProfileIcon },
 ];
@@ -229,7 +229,7 @@ export default function App() {
   // голубым героем экрана), на остальных вкладках — тёмный фон темы.
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
-    const blueTab = tab === "community" || tab === "home" || tab === "trading" || tab === "profile";
+    const blueTab = tab === "community" || tab === "home" || tab === "bets" || tab === "profile";
     // #5CCBFF — верхний цвет голубого героя. Красим И плашку Telegram, И фон
     // viewport (виден при rubber-band overscroll ПОД плашкой — без него там
     // дефолтный чёрный Telegram). Делаем это СТАТИЧНО по вкладке, а НЕ на каждый
@@ -257,7 +257,7 @@ export default function App() {
     const el = mainRef.current;
     if (!el) return;
     el.scrollTop = 0; // при смене вкладки всегда показываем верх новой страницы
-    const blueTab = tab === "community" || tab === "home" || tab === "trading" || tab === "profile";
+    const blueTab = tab === "community" || tab === "home" || tab === "bets" || tab === "profile";
     // Фон main (виден при ВНУТРЕННЕМ rubber-band): голубой у верха, navy при
     // листании. Фон viewport Telegram задан статично по вкладке (см. эффект выше).
     const apply = () => {
@@ -305,7 +305,7 @@ export default function App() {
           {!(error && !me) && (
             <>
               <div hidden={tab !== "home"}><Home me={me ?? PLACEHOLDER_ME} onReload={reload} onOpenReferral={() => setTab("community")} /></div>
-              <div hidden={tab !== "trading"}><Trading me={me ?? PLACEHOLDER_ME} /></div>
+              <div hidden={tab !== "bets"}><MyBets active={tab === "bets"} /></div>
               <div hidden={tab !== "community"}><Community me={me ?? PLACEHOLDER_ME} /></div>
               <div hidden={tab !== "profile"}><Profile me={me ?? PLACEHOLDER_ME} active={tab === "profile"} /></div>
             </>

@@ -70,7 +70,16 @@ export type Bet = {
   payout_nano: number;
   status: string;
   placed_at: string;
+  market_title: string;
+  outcome_title: string;
 };
+
+// fetchMyBets returns the user's bets (newest first), with market + outcome titles.
+export async function fetchMyBets(): Promise<Bet[]> {
+  const r = await fetch(`${API_BASE}/api/bets`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`bets ${r.status}`);
+  return (await r.json()) as Bet[];
+}
 
 // placeBet stakes stakeNano on outcomeId at its current odds. The server moves the
 // stake to escrow and reserves the house payout in one transaction; it rejects the

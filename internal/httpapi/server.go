@@ -358,25 +358,29 @@ type marketDTO struct {
 }
 
 type betDTO struct {
-	ID         int64     `json:"id"`
-	MarketID   int64     `json:"market_id"`
-	OutcomeID  int64     `json:"outcome_id"`
-	StakeNano  int64     `json:"stake_nano"`
-	OddsMilli  int64     `json:"odds_milli"`
-	PayoutNano int64     `json:"payout_nano"`
-	Status     string    `json:"status"`
-	PlacedAt   time.Time `json:"placed_at"`
+	ID           int64     `json:"id"`
+	MarketID     int64     `json:"market_id"`
+	OutcomeID    int64     `json:"outcome_id"`
+	StakeNano    int64     `json:"stake_nano"`
+	OddsMilli    int64     `json:"odds_milli"`
+	PayoutNano   int64     `json:"payout_nano"`
+	Status       string    `json:"status"`
+	PlacedAt     time.Time `json:"placed_at"`
+	MarketTitle  string    `json:"market_title"`
+	OutcomeTitle string    `json:"outcome_title"`
 }
 
 func toBetDTO(b betting.Bet) betDTO {
 	return betDTO{
-		ID:         b.ID,
-		MarketID:   b.MarketID,
-		OutcomeID:  b.OutcomeID,
-		StakeNano:  b.StakeNano,
-		OddsMilli:  b.OddsMilli,
-		PayoutNano: b.PayoutNano,
-		Status:     b.Status,
-		PlacedAt:   b.PlacedAt,
+		ID:           b.ID,
+		MarketID:     b.MarketID,
+		OutcomeID:    b.OutcomeID,
+		StakeNano:    b.StakeNano,
+		OddsMilli:    b.OddsMilli,
+		PayoutNano:   b.PayoutNano,
+		Status:       b.Status,
+		PlacedAt:     b.PlacedAt,
+		MarketTitle:  b.MarketTitle,
+		OutcomeTitle: b.OutcomeTitle,
 	}
 }
