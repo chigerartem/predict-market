@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"predict/internal/db"
+	"predict/internal/deposits"
 	"predict/internal/httpapi"
+	"predict/internal/rates"
 )
 
 func main() {
@@ -46,6 +48,18 @@ func main() {
 		log.Println("WARNING: ALLOW_INSECURE_INITDATA=1 and no TG_BOT_TOKEN — initData is NOT verified (testing only)")
 	}
 	srv := httpapi.New(pool, botToken, webOrigin, devUserID, allowInsecure)
+
+	// Live TON/USD price for valuing Stars deposits. Fallback (conservative/high)
+	// is used only on cold start if CoinGecko is unreachable. Optional env overrides
+	// for the per-star USD anchor and the deposit buffer.
+	srv.SetRates(rates.New(envFloat("TON_USD_FALLBACK", 3.0)))
+	if v := envFloat("STAR_USD_WITHDRAW", 0); v > 0 {
+		deposits.StarUSDWithdraw = v
+	}
+	if v := envFloat("STARS_DEPOSIT_BUFFER", 0); v > 0 {
+		deposits.DepositBuffer = v
+	}
+
 	if err := srv.RegisterWebhook(ctx, os.Getenv("TG_WEBHOOK_URL"), os.Getenv("TG_WEBHOOK_SECRET")); err != nil {
 		log.Printf("webhook registration failed (continuing): %v", err)
 	}
@@ -57,4 +71,11 @@ func main() {
 	}
 	log.Printf("api listening on :%s (web origin %s)", port, webOrigin)
 	log.Fatal(httpSrv.ListenAndServe())
+}
+
+func envFloat(key string, def float64) float64 {
+	if v, err := strconv.ParseFloat(os.Getenv(key), 64); err == nil {
+		return v
+	}
+	return def
 }

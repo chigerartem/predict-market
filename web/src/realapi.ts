@@ -49,3 +49,14 @@ export async function createStarsInvoice(stars: number): Promise<string> {
   const d = (await r.json()) as { link: string };
   return d.link;
 }
+
+// fetchStarsQuote returns how much TON (nano) a given Stars amount credits right
+// now at the live rate — so the UI shows an honest equivalent before paying.
+export async function fetchStarsQuote(stars: number): Promise<number> {
+  const r = await fetch(`${API_BASE}/api/deposit/stars/quote?stars=${stars}`, {
+    headers: authHeaders(),
+  });
+  if (!r.ok) throw new Error(`quote ${r.status}`);
+  const d = (await r.json()) as { ton_nano: number };
+  return d.ton_nano;
+}

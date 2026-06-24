@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"predict/internal/deposits"
 	"predict/internal/ledger"
 	"predict/internal/markets"
+	"predict/internal/rates"
 	"predict/internal/tg"
 )
 
@@ -25,8 +27,9 @@ import (
 type Server struct {
 	pool          *pgxpool.Pool
 	botToken      string
-	tg            *tg.Client // nil when no bot token → Stars deposit disabled
-	webhookSecret string     // shared secret Telegram echoes on webhook calls
+	tg            *tg.Client      // nil when no bot token → Stars deposit disabled
+	rates         *rates.Provider // live TON/USD price for valuing Stars deposits
+	webhookSecret string          // shared secret Telegram echoes on webhook calls
 	webOrigin     string
 	devUserID     int64 // when > 0, fallback identity for local dev
 	allowInsecure bool  // when true and no bot token, accept initData WITHOUT verifying (testing only)
@@ -41,6 +44,9 @@ func New(pool *pgxpool.Pool, botToken, webOrigin string, devUserID int64, allowI
 	return s
 }
 
+// SetRates wires the live TON/USD price provider used to value Stars deposits.
+func (s *Server) SetRates(r *rates.Provider) { s.rates = r }
+
 // Handler returns the configured HTTP handler (with CORS).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -50,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/bets", s.auth(s.handleMyBets))
 	mux.HandleFunc("POST /api/bets", s.auth(s.handlePlaceBet))
 	mux.HandleFunc("POST /api/deposit/stars/invoice", s.auth(s.handleStarsInvoice))
+	mux.HandleFunc("GET /api/deposit/stars/quote", s.auth(s.handleStarsQuote))
 	mux.HandleFunc("POST /api/tg/webhook", s.handleTgWebhook)
 	return s.cors(mux)
 }
@@ -220,6 +227,22 @@ func (s *Server) handleStarsInvoice(w http.ResponseWriter, r *http.Request, user
 	writeJSON(w, http.StatusOK, map[string]string{"link": link})
 }
 
+// handleStarsQuote returns how much TON a given Stars amount credits right now, so
+// the Mini App can show an honest live equivalent before the user pays.
+func (s *Server) handleStarsQuote(w http.ResponseWriter, r *http.Request, _ int64) {
+	if s.rates == nil {
+		writeErr(w, http.StatusServiceUnavailable, "rate unavailable")
+		return
+	}
+	stars, _ := strconv.ParseInt(r.URL.Query().Get("stars"), 10, 64)
+	if stars < MinDepositStars || stars > MaxDepositStars {
+		writeErr(w, http.StatusBadRequest, "invalid amount")
+		return
+	}
+	nano := deposits.StarsToNano(stars, s.rates.TonUSD(r.Context()))
+	writeJSON(w, http.StatusOK, starsQuoteDTO{Stars: stars, TonNano: nano})
+}
+
 // RegisterWebhook stores the secret used to authenticate incoming webhook calls
 // and (if url is non-empty) registers it with Telegram. No-op without a bot token.
 func (s *Server) RegisterWebhook(ctx context.Context, url, secret string) error {
@@ -268,7 +291,11 @@ func (s *Server) handleTgWebhook(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			if err := deposits.CreditStars(r.Context(), s.pool, m.From.ID, sp.TotalAmount, sp.TelegramPaymentChargeID); err != nil {
+			tonUSD := 0.0
+			if s.rates != nil {
+				tonUSD = s.rates.TonUSD(r.Context())
+			}
+			if err := deposits.CreditStars(r.Context(), s.pool, m.From.ID, sp.TotalAmount, sp.TelegramPaymentChargeID, tonUSD); err != nil {
 				log.Printf("webhook credit stars user %d charge %s: %v", m.From.ID, sp.TelegramPaymentChargeID, err)
 				w.WriteHeader(http.StatusInternalServerError) // let Telegram retry
 				return
@@ -309,6 +336,11 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 type meDTO struct {
 	UserID      int64 `json:"user_id"`
 	BalanceNano int64 `json:"balance_nano"`
+}
+
+type starsQuoteDTO struct {
+	Stars   int64 `json:"stars"`
+	TonNano int64 `json:"ton_nano"`
 }
 
 type outcomeDTO struct {

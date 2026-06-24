@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
-import { createStarsInvoice } from "../realapi";
+import { createStarsInvoice, fetchStarsQuote } from "../realapi";
 import { useT, type TKey, type TFunc } from "../i18n";
 import TonIcon from "./TonIcon";
 
@@ -14,8 +14,6 @@ const METHODS: { id: Method; emoji: ReactNode; title: TKey; desc: TKey }[] = [
   { id: "stars", emoji: "⭐", title: "dep.stars", desc: "dep.starsDesc" },
 ];
 
-// Stars peg, mirrors backend deposits.StarsPerTON.
-const STARS_PER_TON = 200;
 const MIN_STARS = 50;
 const PRESETS = [100, 250, 500, 1000];
 
@@ -113,11 +111,35 @@ function StarsDeposit({
   onSuccess?: () => void;
 }) {
   const [stars, setStars] = useState(500);
+  const [tonNano, setTonNano] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const tonEq = (stars / STARS_PER_TON).toFixed(2);
   const valid = stars >= MIN_STARS;
+
+  // Живой эквивалент в TON с бэка (курс динамический), с debounce на ручной ввод.
+  useEffect(() => {
+    if (!valid) {
+      setTonNano(null);
+      return;
+    }
+    let cancelled = false;
+    const id = setTimeout(() => {
+      fetchStarsQuote(stars)
+        .then((nano) => {
+          if (!cancelled) setTonNano(nano);
+        })
+        .catch(() => {
+          if (!cancelled) setTonNano(null);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [stars, valid]);
+
+  const tonEq = tonNano !== null ? (tonNano / 1_000_000_000).toFixed(2) : "…";
 
   const pay = async () => {
     if (!valid || busy) return;
