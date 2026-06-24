@@ -108,8 +108,8 @@ func GetMarket(ctx context.Context, pool *pgxpool.Pool, id int64) (Market, error
 	return m, rows.Err()
 }
 
-// ListOpenMarkets returns markets currently open for betting (without outcomes).
-func ListOpenMarkets(ctx context.Context, pool *pgxpool.Pool) ([]Market, error) {
+// ListOpen returns markets currently open for betting, each with its outcomes.
+func ListOpen(ctx context.Context, pool *pgxpool.Pool) ([]Market, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT id, source, title, COALESCE(category, ''), status, close_time
 		   FROM markets WHERE status = 'OPEN' ORDER BY created_at DESC`)
@@ -117,13 +117,42 @@ func ListOpenMarkets(ctx context.Context, pool *pgxpool.Pool) ([]Market, error) 
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Market
+
+	var list []Market
+	idx := map[int64]int{}
+	var ids []int64
 	for rows.Next() {
 		var m Market
 		if err := rows.Scan(&m.ID, &m.Source, &m.Title, &m.Category, &m.Status, &m.CloseTime); err != nil {
 			return nil, err
 		}
-		out = append(out, m)
+		idx[m.ID] = len(list)
+		list = append(list, m)
+		ids = append(ids, m.ID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return list, nil
+	}
+
+	orows, err := pool.Query(ctx,
+		`SELECT id, market_id, title, odds_milli, max_liability_nano, total_stake_nano, total_payout_nano
+		   FROM outcomes WHERE market_id = ANY($1) ORDER BY market_id, sort_order, id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer orows.Close()
+	for orows.Next() {
+		var o Outcome
+		if err := orows.Scan(&o.ID, &o.MarketID, &o.Title, &o.OddsMilli,
+			&o.MaxLiabilityNano, &o.TotalStakeNano, &o.TotalPayoutNano); err != nil {
+			return nil, err
+		}
+		if i, ok := idx[o.MarketID]; ok {
+			list[i].Outcomes = append(list[i].Outcomes, o)
+		}
+	}
+	return list, orows.Err()
 }

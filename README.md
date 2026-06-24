@@ -19,20 +19,26 @@
 ## Локальная разработка
 
 ```bash
-# 1. Поднять Postgres. Хост-порт 55432 (5432 занят Docker-прокси, 5433 — нативным PostgreSQL 18).
+# 1. Поднять Postgres (хост-порт 55432; 5432/5433 заняты Docker-прокси и нативным PG18).
 docker compose up -d --wait
 
-# 2. Прогнать тесты леджера
-DATABASE_URL='postgres://predict:predict@localhost:55432/predict?sslmode=disable' go test ./...
+export DATABASE_URL='postgres://predict:predict@localhost:55432/predict?sslmode=disable'
 
-# 3. Применить миграции вручную (опционально — тесты применяют сами)
-DATABASE_URL='postgres://predict:predict@localhost:55432/predict?sslmode=disable' go run ./cmd/migrate
+# 2. Тесты. Интеграционные тесты делят одну БД — пакеты гоняем последовательно (-p 1).
+go test -p 1 ./...
+
+# 3. HTTP API. DEV_USER_ID подставляет тестового юзера без Telegram (только локально).
+DEV_USER_ID=1 PORT=8000 go run ./cmd/api
+
+# 4. Mini App (фронт).
+VITE_API_BASE=http://localhost:8000 npm --prefix web run dev
 ```
 
 ## Статус
 
 - ✅ **Фаза 0 — денежный леджер**: двойная запись, целые наносы, инварианты на уровне БД (zero-sum + неотрицательность), идемпотентность.
 - ✅ **Фаза 1 — рынки + ставочный цикл**: рынки/исходы, ставки (escrow + liability-reserve), ручной сеттлмент и возврат, лимиты ответственности на исход; тесты зелёные.
+- ✅ **Mini App + HTTP API**: фронт `web/` (React/Vite/Tailwind, нативный Telegram WebApp) + Go API `cmd/api` (tma-авторизация). Цель деплоя — `market.kopix.online` (Traefik, тот же VPS, что cashback).
 - ⏭️ **Фаза 2 — интеграция Polymarket** (следующее).
 
 Полный план — в [`docs/architecture.md`](docs/architecture.md).

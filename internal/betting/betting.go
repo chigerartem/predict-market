@@ -376,3 +376,24 @@ func VoidMarket(ctx context.Context, pool *pgxpool.Pool, marketID int64) error {
 	}
 	return tx.Commit(ctx)
 }
+
+// ListUserBets returns a user's bets, newest first.
+func ListUserBets(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]Bet, error) {
+	rows, err := pool.Query(ctx,
+		`SELECT id, user_id, market_id, outcome_id, stake_nano, odds_milli, payout_nano, status, placed_at
+		   FROM bets WHERE user_id = $1 ORDER BY placed_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Bet
+	for rows.Next() {
+		var b Bet
+		if err := rows.Scan(&b.ID, &b.UserID, &b.MarketID, &b.OutcomeID,
+			&b.StakeNano, &b.OddsMilli, &b.PayoutNano, &b.Status, &b.PlacedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
