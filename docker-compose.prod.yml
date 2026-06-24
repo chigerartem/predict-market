@@ -35,6 +35,8 @@ services:
       WEB_ORIGIN: https://market.kopix.online
       PORT: "8000"
       ALLOW_INSECURE_INITDATA: ${ALLOW_INSECURE_INITDATA:-}
+      TG_WEBHOOK_URL: ${TG_WEBHOOK_URL:-}
+      TG_WEBHOOK_SECRET: ${TG_WEBHOOK_SECRET:-}
     depends_on:
       db:
         condition: service_healthy
