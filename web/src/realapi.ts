@@ -26,3 +26,26 @@ export async function fetchMarkets(): Promise<Market[]> {
   if (!r.ok) throw new Error(`markets ${r.status}`);
   return (await r.json()) as Market[];
 }
+
+export type Me = { user_id: number; balance_nano: number };
+
+// fetchMe returns the authenticated user's TON balance (nano-TON).
+export async function fetchMe(): Promise<Me> {
+  const r = await fetch(`${API_BASE}/api/me`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`me ${r.status}`);
+  return (await r.json()) as Me;
+}
+
+// createStarsInvoice asks the backend for a Stars (XTR) invoice link the Mini App
+// opens via Telegram.WebApp.openInvoice. The balance is credited server-side on the
+// successful_payment webhook, so refetch the balance once openInvoice reports "paid".
+export async function createStarsInvoice(stars: number): Promise<string> {
+  const r = await fetch(`${API_BASE}/api/deposit/stars/invoice`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ stars }),
+  });
+  if (!r.ok) throw new Error(`invoice ${r.status}`);
+  const d = (await r.json()) as { link: string };
+  return d.link;
+}

@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
-import { useT, type TKey } from "../i18n";
+import { createStarsInvoice } from "../realapi";
+import { useT, type TKey, type TFunc } from "../i18n";
 import TonIcon from "./TonIcon";
 
 type Method = "gifts" | "ton" | "stars";
-type Props = { open: boolean; onClose: () => void };
+type Props = { open: boolean; onClose: () => void; onSuccess?: () => void };
 
 const METHODS: { id: Method; emoji: ReactNode; title: TKey; desc: TKey }[] = [
   { id: "gifts", emoji: "🎁", title: "dep.gifts", desc: "dep.giftsDesc" },
@@ -13,13 +14,16 @@ const METHODS: { id: Method; emoji: ReactNode; title: TKey; desc: TKey }[] = [
   { id: "stars", emoji: "⭐", title: "dep.stars", desc: "dep.starsDesc" },
 ];
 
-// Пополнение баланса (TON) тремя способами: подарки, TON-кошелёк, Telegram Stars.
-// Реальные интеграции (приём подарка, TON Connect, Stars invoice) подключим к Go
-// API позже — пока выбор способа показывает каркас-заглушку «скоро».
-export default function DepositModal({ open, onClose }: Props) {
+// Stars peg, mirrors backend deposits.StarsPerTON.
+const STARS_PER_TON = 200;
+const MIN_STARS = 50;
+const PRESETS = [100, 250, 500, 1000];
+
+// Пополнение баланса (TON). Stars — рабочий путь (инвойс → openInvoice → кредит на
+// webhook); TON и подарки пока заглушка «скоро».
+export default function DepositModal({ open, onClose, onSuccess }: Props) {
   const t = useT();
   const [method, setMethod] = useState<Method | null>(null);
-  // Лист тёмный поверх затемнения → красим native-шапку Telegram в тёмный.
   useBodyScrollLock(open, "#0A0E16");
   useEffect(() => {
     if (open) setMethod(null);
@@ -74,6 +78,8 @@ export default function DepositModal({ open, onClose }: Props) {
               ))}
             </div>
           </>
+        ) : active.id === "stars" ? (
+          <StarsDeposit t={t} onBack={() => setMethod(null)} onClose={onClose} onSuccess={onSuccess} />
         ) : (
           <div className="flex flex-col items-center pb-2 pt-3 text-center">
             <span className="grid h-20 w-20 place-items-center rounded-full bg-white/5 text-4xl">
@@ -92,5 +98,105 @@ export default function DepositModal({ open, onClose }: Props) {
       </div>
     </div>,
     document.body,
+  );
+}
+
+function StarsDeposit({
+  t,
+  onBack,
+  onClose,
+  onSuccess,
+}: {
+  t: TFunc;
+  onBack: () => void;
+  onClose: () => void;
+  onSuccess?: () => void;
+}) {
+  const [stars, setStars] = useState(500);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const tonEq = (stars / STARS_PER_TON).toFixed(2);
+  const valid = stars >= MIN_STARS;
+
+  const pay = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const link = await createStarsInvoice(stars);
+      const tg = window.Telegram?.WebApp;
+      if (tg?.openInvoice) {
+        tg.openInvoice(link, (status) => {
+          if (status === "paid") {
+            onSuccess?.();
+            onClose();
+          }
+        });
+      } else {
+        // Вне Telegram (или старый клиент) — открываем счёт ссылкой.
+        window.open(link, "_blank");
+      }
+    } catch {
+      setErr(t("dep.payError"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="pt-1">
+      <button
+        onClick={onBack}
+        className="mb-3 inline-flex items-center gap-1 text-sm text-neutral-400 hover:text-neutral-200"
+      >
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M15 6l-6 6 6 6" />
+        </svg>
+        {t("common.back")}
+      </button>
+
+      <label className="mb-2 block text-xs font-medium text-neutral-400">{t("dep.starsAmount")}</label>
+      <div className="mb-3 grid grid-cols-4 gap-2">
+        {PRESETS.map((p) => (
+          <button
+            key={p}
+            onClick={() => setStars(p)}
+            className={
+              "rounded-xl border py-2 text-sm font-semibold tabular-nums transition active:scale-95 " +
+              (stars === p
+                ? "border-sky-400 bg-sky-400/15 text-sky-300"
+                : "border-white/10 bg-white/[0.04] text-neutral-200 hover:bg-white/[0.08]")
+            }
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3.5">
+        <span className="text-lg">⭐</span>
+        <input
+          inputMode="numeric"
+          value={stars}
+          onChange={(e) => setStars(Math.max(0, Math.floor(Number(e.target.value.replace(/\D/g, "")) || 0)))}
+          className="min-w-0 flex-1 bg-transparent py-3.5 text-base tabular-nums outline-none placeholder:text-neutral-600"
+        />
+        <span className="flex items-center gap-1.5 text-sm font-medium text-neutral-400">
+          <TonIcon size={16} />≈ {tonEq} TON
+        </span>
+      </div>
+
+      {err && <p className="mb-3 text-center text-xs text-red-400">{err}</p>}
+      {!valid && <p className="mb-3 text-center text-xs text-neutral-500">{t("dep.minStars")}</p>}
+
+      <button
+        onClick={pay}
+        disabled={!valid || busy}
+        className="w-full rounded-2xl bg-sky-500 py-3.5 text-sm font-semibold text-white transition active:scale-[0.99] enabled:hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {busy ? t("dep.processing") : `${t("dep.pay")} ${stars} ⭐`}
+      </button>
+    </div>
   );
 }

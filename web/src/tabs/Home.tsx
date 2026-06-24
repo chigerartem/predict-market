@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { MeResponse } from "../api";
-import { fetchMarkets, type Market } from "../realapi";
+import { fetchMarkets, fetchMe, type Market } from "../realapi";
 import { fmtTon } from "../format";
 import { useT } from "../i18n";
 import TonIcon from "../components/TonIcon";
@@ -13,13 +13,23 @@ type Props = {
   onOpenReferral: () => void;
 };
 
-// Главная prediction-маркета: компактный голубой герой (баланс в TON +
+// Главная prediction-маркета: компактный голубой герой (реальный баланс в TON +
 // Пополнить/Вывести), под ним — лента рынков (событий).
-export default function Home({ me }: Props) {
+export default function Home(_props: Props) {
   const t = useT();
   const [deposit, setDeposit] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
-  const balance = me.ton_balance ?? "0";
+
+  // Реальный баланс из /api/me (наноTON). Обновляется после успешного депозита.
+  const [balanceNano, setBalanceNano] = useState<number | null>(null);
+  const loadBalance = useCallback(() => {
+    fetchMe()
+      .then((m) => setBalanceNano(m.balance_nano))
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    loadBalance();
+  }, [loadBalance]);
 
   const [markets, setMarkets] = useState<Market[] | null>(null);
   useEffect(() => {
@@ -27,6 +37,8 @@ export default function Home({ me }: Props) {
       .then(setMarkets)
       .catch(() => setMarkets([]));
   }, []);
+
+  const balanceTon = (balanceNano ?? 0) / 1_000_000_000;
 
   return (
     <div>
@@ -36,7 +48,7 @@ export default function Home({ me }: Props) {
         <div className="mt-1.5 flex items-end justify-center gap-2">
           <TonIcon size={30} className="mb-1" />
           <span className="text-[2.5rem] font-semibold leading-none tracking-tight tabular-nums">
-            {fmtTon(balance)}
+            {fmtTon(balanceTon)}
           </span>
           <span className="mb-1 text-sm font-medium text-white/70">TON</span>
         </div>
@@ -78,8 +90,8 @@ export default function Home({ me }: Props) {
         )}
       </div>
 
-      <DepositModal open={deposit} onClose={() => setDeposit(false)} />
-      <WithdrawModal open={withdraw} onClose={() => setWithdraw(false)} balanceTon={balance} />
+      <DepositModal open={deposit} onClose={() => setDeposit(false)} onSuccess={loadBalance} />
+      <WithdrawModal open={withdraw} onClose={() => setWithdraw(false)} balanceTon={String(balanceTon)} />
     </div>
   );
 }
