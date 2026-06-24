@@ -119,8 +119,8 @@ func UpsertExternal(ctx context.Context, pool *pgxpool.Pool, source, sourceID, t
 		}
 	case err == nil:
 		if _, err := tx.Exec(ctx,
-			`UPDATE markets SET title = $2, close_time = $3, updated_at = now() WHERE id = $1`,
-			marketID, title, closeTime); err != nil {
+			`UPDATE markets SET title = $2, category = NULLIF($3, ''), close_time = $4, updated_at = now() WHERE id = $1`,
+			marketID, title, category, closeTime); err != nil {
 			return err
 		}
 		for i, o := range outs {

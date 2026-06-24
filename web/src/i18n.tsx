@@ -53,6 +53,8 @@ const en = {
   "home.withdraw": "Withdraw",
   "home.events": "Events",
   "home.noEvents": "No open events yet",
+  "home.search": "Search markets",
+  "home.noResults": "Nothing found",
 
   "dep.title": "Top up balance",
   "dep.subtitle": "Choose how to deposit",
@@ -311,6 +313,8 @@ const ru: Record<TKey, string> = {
   "home.withdraw": "Вывести",
   "home.events": "События",
   "home.noEvents": "Пока нет открытых событий",
+  "home.search": "Поиск рынков",
+  "home.noResults": "Ничего не найдено",
 
   "dep.title": "Пополнить баланс",
   "dep.subtitle": "Выберите способ пополнения",

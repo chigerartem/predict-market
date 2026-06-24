@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"math"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -77,11 +78,37 @@ func Ingest(ctx context.Context, pool *pgxpool.Pool, limit int, edge, maxProb fl
 			continue
 		}
 
-		if err := markets.UpsertExternal(ctx, pool, "polymarket", pm.ConditionID, pm.Question, "", pm.EndTime(), outs); err != nil {
+		if err := markets.UpsertExternal(ctx, pool, "polymarket", pm.ConditionID, pm.Question, categorize(pm.Question), pm.EndTime(), outs); err != nil {
 			log.Printf("polymarket ingest upsert %s: %v", pm.ConditionID, err)
 			continue
 		}
 		count++
 	}
 	return count, nil
+}
+
+// categorize buckets a market by keywords in its question. Polymarket's API gives
+// no clean per-market category, so we infer one for filtering on the client.
+func categorize(question string) string {
+	q := strings.ToLower(question)
+	has := func(words ...string) bool {
+		for _, w := range words {
+			if strings.Contains(q, w) {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case has("bitcoin", "btc", "ethereum", " eth", "crypto", "solana", " sol ", "dogecoin", " xrp", "stablecoin", "altcoin"):
+		return "crypto"
+	case has("world cup", "fifa", "nba", "nfl", "super bowl", "champions league", "premier league", "la liga", "uefa", "olympic", "tennis", "grand prix", " f1 ", "playoff", "finals", "ufc", "boxing", "cricket", "super cup", "ballon"):
+		return "sports"
+	case has("election", "president", "nomination", "senate", "governor", "congress", "democrat", "republican", "trump", "biden", "vance", "newsom", "mamdani", "prime minister", "parliament", "vote", "ballot", "poll", "approval rating", "cabinet", "resign"):
+		return "politics"
+	case has("fed", "interest rate", "inflation", "recession", "gdp", "s&p", "nasdaq", "stock", "earnings", "unemployment", "jobs report", "tariff"):
+		return "economy"
+	default:
+		return "other"
+	}
 }

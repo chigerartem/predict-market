@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { MeResponse } from "../api";
 import { fetchMarkets, fetchMe, type Market } from "../realapi";
 import { fmtTon } from "../format";
@@ -13,12 +13,33 @@ type Props = {
   onOpenReferral: () => void;
 };
 
+// Категории фильтра — совпадают с тем, что проставляет бэкенд (polymarket.categorize).
+const FILTERS = [
+  { key: "all", label: "Все" },
+  { key: "sports", label: "Спорт" },
+  { key: "politics", label: "Политика" },
+  { key: "crypto", label: "Крипто" },
+  { key: "economy", label: "Экономика" },
+  { key: "other", label: "Прочее" },
+];
+
+const CATEGORY_LABEL: Record<string, string> = {
+  sports: "Спорт",
+  politics: "Политика",
+  crypto: "Крипто",
+  economy: "Экономика",
+  tech: "Технологии",
+  other: "Прочее",
+};
+
 // Главная prediction-маркета: компактный голубой герой (реальный баланс в TON +
-// Пополнить/Вывести), под ним — лента рынков (событий).
+// Пополнить/Вывести), под ним — лента рынков с фильтром по категории и поиском.
 export default function Home(_props: Props) {
   const t = useT();
   const [deposit, setDeposit] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
+  const [cat, setCat] = useState("all");
+  const [search, setSearch] = useState("");
 
   // Реальный баланс из /api/me (наноTON). Обновляется после успешного депозита.
   const [balanceNano, setBalanceNano] = useState<number | null>(null);
@@ -39,6 +60,15 @@ export default function Home(_props: Props) {
   }, []);
 
   const balanceTon = (balanceNano ?? 0) / 1_000_000_000;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (markets ?? []).filter((m) => {
+      if (cat !== "all" && (m.category || "other") !== cat) return false;
+      if (q && !m.title.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [markets, cat, search]);
 
   return (
     <div>
@@ -70,20 +100,43 @@ export default function Home(_props: Props) {
       </div>
 
       <div className="px-4 pb-28 pt-4">
-        <div className="mb-3 px-1 text-sm font-semibold text-neutral-300">{t("home.events")}</div>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t("home.search")}
+          className="mb-3 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm text-white outline-none placeholder:text-neutral-500"
+        />
+
+        <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setCat(f.key)}
+              className={
+                "shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold transition active:scale-95 " +
+                (cat === f.key
+                  ? "bg-sky-500 text-white"
+                  : "bg-white/[0.06] text-neutral-300 hover:bg-white/10")
+              }
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
         {markets === null ? (
           <div className="space-y-3">
             {[0, 1, 2].map((i) => (
               <div key={i} className="h-28 animate-pulse rounded-2xl bg-white/5" />
             ))}
           </div>
-        ) : markets.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center text-sm text-neutral-400">
-            {t("home.noEvents")}
+            {markets.length === 0 ? t("home.noEvents") : t("home.noResults")}
           </div>
         ) : (
           <div className="space-y-3">
-            {markets.map((m) => (
+            {filtered.map((m) => (
               <MarketCard key={m.id} market={m} />
             ))}
           </div>
@@ -95,12 +148,6 @@ export default function Home(_props: Props) {
     </div>
   );
 }
-
-const CATEGORY_LABEL: Record<string, string> = {
-  sports: "Спорт",
-  crypto: "Крипто",
-  tech: "Технологии",
-};
 
 function MarketCard({ market }: { market: Market }) {
   return (
