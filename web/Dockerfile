@@ -1,10 +1,12 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
-COPY package*.json ./
-RUN npm install --legacy-peer-deps
-COPY . .
 ARG VITE_API_BASE
 ENV VITE_API_BASE=$VITE_API_BASE
+
+COPY package.json ./
+RUN npm install --legacy-peer-deps
+
+COPY . .
 RUN npm run build
 
 FROM nginx:1.27-alpine
