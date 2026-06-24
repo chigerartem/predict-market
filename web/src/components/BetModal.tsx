@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { useKeyboardInsetSheet } from "../hooks/useKeyboardInsetSheet";
 import { placeBet, type Market, type MarketOutcome } from "../realapi";
 import { fmtTon } from "../format";
 import { useT } from "../i18n";
@@ -27,6 +28,7 @@ export default function BetModal({ open, onClose, market, outcome, balanceTon, o
   const [done, setDone] = useState(false);
 
   useBodyScrollLock(open, "#0A0E16");
+  const sheetRef = useKeyboardInsetSheet(open);
   useEffect(() => {
     if (open) {
       setStake("1");
@@ -61,8 +63,14 @@ export default function BetModal({ open, onClose, market, outcome, balanceTon, o
   };
 
   return createPortal(
+    // Без тёмной ширмы: прозрачный контейнер, карточка выезжает снизу прямо на фон
+    // Home. Затемнения нет → на стыке с шапкой TG и под клавиатурой нечему «рваться»
+    // (любая тёмная заливка контрастировала с голубым фоном и читалась как разрыв).
+    // Карточка тёмная/непрозрачная — сама выделяется. Контейнер по высоте синкается с
+    // visualViewport (useKeyboardInsetSheet) → карточка садится над клавиатурой.
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+      ref={sheetRef}
+      className="fixed inset-x-0 top-0 z-50 flex h-full items-end justify-center"
       onClick={onClose}
     >
       <div
@@ -93,9 +101,8 @@ export default function BetModal({ open, onClose, market, outcome, balanceTon, o
           <>
             <p className="mb-3 text-sm leading-snug text-neutral-300">{market.title}</p>
 
-            <div className="mb-4 flex items-center justify-between rounded-2xl border border-sky-400/40 bg-sky-400/10 p-3.5">
+            <div className="mb-4 rounded-2xl border border-sky-400/40 bg-sky-400/10 p-3.5">
               <span className="text-sm font-semibold text-white">{outcome.title}</span>
-              <span className="text-base font-bold tabular-nums text-sky-300">{odds.toFixed(2)}</span>
             </div>
 
             <label className="mb-1.5 block text-xs font-medium text-neutral-400">{t("bet.amount")}</label>

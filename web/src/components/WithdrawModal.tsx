@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { useKeyboardInsetSheet } from "../hooks/useKeyboardInsetSheet";
 import { fmtTon } from "../format";
 import { useT } from "../i18n";
 import TonIcon from "./TonIcon";
@@ -14,6 +15,7 @@ export default function WithdrawModal({ open, onClose, balanceTon }: Props) {
   const [amount, setAmount] = useState("");
   const [address, setAddress] = useState("");
   useBodyScrollLock(open, "#0A0E16");
+  const sheetRef = useKeyboardInsetSheet(open);
   useEffect(() => {
     if (open) {
       setAmount("");
@@ -28,8 +30,14 @@ export default function WithdrawModal({ open, onClose, balanceTon }: Props) {
   const canSubmit = amountValid && address.trim().length > 0;
 
   return createPortal(
+    // Без тёмной ширмы: прозрачный контейнер, карточка выезжает снизу прямо на фон
+    // Home. Затемнения нет → на стыке с шапкой TG и под клавиатурой нечему «рваться»
+    // (любая тёмная заливка контрастировала с голубым фоном и читалась как разрыв).
+    // Карточка тёмная/непрозрачная — сама выделяется. Контейнер по высоте синкается с
+    // visualViewport (useKeyboardInsetSheet) → карточка садится над клавиатурой.
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+      ref={sheetRef}
+      className="fixed inset-x-0 top-0 z-50 flex h-full items-end justify-center"
       onClick={onClose}
     >
       <div

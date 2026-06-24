@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { useKeyboardInsetSheet } from "../hooks/useKeyboardInsetSheet";
 import { createStarsInvoice, fetchStarsQuote } from "../realapi";
 import { useT, type TKey, type TFunc } from "../i18n";
 import TonIcon from "./TonIcon";
@@ -23,6 +24,7 @@ export default function DepositModal({ open, onClose, onSuccess }: Props) {
   const t = useT();
   const [method, setMethod] = useState<Method | null>(null);
   useBodyScrollLock(open, "#0A0E16");
+  const sheetRef = useKeyboardInsetSheet(open);
   useEffect(() => {
     if (open) setMethod(null);
   }, [open]);
@@ -31,8 +33,14 @@ export default function DepositModal({ open, onClose, onSuccess }: Props) {
   const active = METHODS.find((m) => m.id === method);
 
   return createPortal(
+    // Без тёмной ширмы: прозрачный контейнер, карточка выезжает снизу прямо на фон
+    // Home. Затемнения нет → на стыке с шапкой TG и под клавиатурой нечему «рваться»
+    // (любая тёмная заливка контрастировала с голубым фоном и читалась как разрыв).
+    // Карточка тёмная/непрозрачная — сама выделяется. Контейнер по высоте синкается с
+    // visualViewport (useKeyboardInsetSheet) → карточка садится над клавиатурой.
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+      ref={sheetRef}
+      className="fixed inset-x-0 top-0 z-50 flex h-full items-end justify-center"
       onClick={onClose}
     >
       <div
