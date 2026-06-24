@@ -8,13 +8,15 @@ if (window.Telegram?.WebApp) {
   const tg = window.Telegram.WebApp;
   tg.ready();
   tg.expand();
+  // Paint the Telegram header + viewport blue so the top bar blends with the
+  // blue hero (the signature look). Bottom bar stays navy (nav island sits there).
   try {
-    tg.setHeaderColor?.("#0A0E16");
+    tg.setHeaderColor?.("#5CCBFF");
   } catch {
     /* noop */
   }
   try {
-    tg.setBackgroundColor?.("#0A0E16");
+    tg.setBackgroundColor?.("#5CCBFF");
   } catch {
     /* noop */
   }

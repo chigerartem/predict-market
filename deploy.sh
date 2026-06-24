@@ -3,6 +3,9 @@
 # Run from the repo root:  bash deploy.sh
 set -euo pipefail
 
+# Run from the repo root regardless of caller's cwd (tar packs '.').
+cd "$(dirname "$0")"
+
 REMOTE="${REMOTE:-kopix-cashback}"
 DIR="${DIR:-kopix-predict}"
 

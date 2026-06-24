@@ -60,11 +60,11 @@ function Lottie({ src, className }: { src: string; className?: string }) {
 
 function Screen({ src, title, subtitle }: { src: string; title: string; subtitle: string }) {
   return (
-    <div className="flex flex-col items-center px-6 pt-8 text-center">
-      <Lottie src={src} className="h-60 w-60" />
-      <h1 className="mt-2 text-2xl font-bold">{title}</h1>
+    <div className="flex flex-col items-center px-2 pt-2 text-center">
+      <Lottie src={src} className="h-52 w-52" />
+      <h1 className="mt-2 text-xl font-bold">{title}</h1>
       <p className="mt-2 max-w-xs text-sm leading-relaxed text-neutral-400">{subtitle}</p>
-      <span className="mt-6 rounded-full bg-white/[0.06] px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-neutral-400">
+      <span className="mt-5 rounded-full bg-white/[0.06] px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-neutral-400">
         Скоро
       </span>
     </div>
@@ -75,42 +75,84 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("home");
   const u = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const name = u?.first_name || u?.username || "Гость";
+  const handle = u?.username ? `@${u.username}` : "";
+  const mainRef = useRef<HTMLElement>(null);
+
+  // Keep the Telegram header + viewport blue so the top bar blends with the hero.
+  useEffect(() => {
+    const tg = window.Telegram?.WebApp;
+    try {
+      tg?.setHeaderColor?.("#5CCBFF");
+      tg?.setBackgroundColor?.("#5CCBFF");
+    } catch {
+      /* old client */
+    }
+  }, []);
+
+  // Two-colour rubber-band: blue near the top (blends with the hero), navy once
+  // scrolled — so the top overscroll is blue and the bottom is the dark body.
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    const apply = () => {
+      el.style.backgroundColor = el.scrollTop < 56 ? "#5CCBFF" : "#0A0E16";
+    };
+    apply();
+    el.addEventListener("scroll", apply, { passive: true });
+    return () => el.removeEventListener("scroll", apply);
+  }, [tab]);
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-2.5 px-4 py-3">
-        <span className="grid h-9 w-9 place-items-center rounded-full bg-sky-400/15 text-sm font-bold text-sky-300">
-          {name[0]?.toUpperCase() || "?"}
-        </span>
-        <div className="leading-tight">
-          <div className="text-[11px] text-neutral-500">KopiX Predict</div>
-          <div className="text-sm font-semibold">{name}</div>
-        </div>
-      </header>
+      <main ref={mainRef} className="flex-1 overflow-y-scroll overscroll-y-none">
+        <div className="min-h-[calc(100%+96px)] bg-[#0A0E16]">
+          {/* Blue hero — paints the upper screen blue and blends with the blue
+              Telegram header. Greeting + balance (in TON). */}
+          <div className="flex w-full flex-col bg-gradient-to-b from-[#5CCBFF] to-[#2E9BE6] pb-7 text-white">
+            <div className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-[38px] w-[38px] place-items-center rounded-full bg-white/20 text-sm font-bold">
+                  {name[0]?.toUpperCase() || "?"}
+                </span>
+                <div className="text-left leading-tight">
+                  <div className="text-[11px] text-white/75">Добро пожаловать</div>
+                  <div className="text-sm font-semibold">{name}</div>
+                </div>
+              </div>
+              {handle && <div className="text-[11px] text-white/70">{handle}</div>}
+            </div>
+            <div className="px-8 pt-3 text-center">
+              <div className="text-sm font-medium text-white/85">Ваш баланс</div>
+              <div className="mt-1 text-6xl font-extrabold tracking-tight tabular-nums">0</div>
+              <div className="mt-2 text-xs text-white/75">TON</div>
+            </div>
+          </div>
 
-      <main className="flex-1 overflow-y-scroll overscroll-y-none">
-        <div className="min-h-[calc(100%+96px)] pb-32">
-          {tab === "home" && (
-            <Screen
-              src="/lottie/onb-cashback.json"
-              title="Рынок прогнозов"
-              subtitle="Предсказывай исходы реальных событий и забирай выигрыш — прямо в Telegram."
-            />
-          )}
-          {tab === "markets" && (
-            <Screen
-              src="/lottie/liberty.json"
-              title="Рынки"
-              subtitle="Скоро здесь появятся события: спорт, крипта, политика и не только."
-            />
-          )}
-          {tab === "profile" && (
-            <Screen
-              src="/lottie/vip-crown.json"
-              title={name}
-              subtitle="Баланс, история ставок и статистика прогнозиста."
-            />
-          )}
+          {/* Dark content area with a lottie hero per tab. */}
+          <div className="px-4 pb-32 pt-6">
+            {tab === "home" && (
+              <Screen
+                src="/lottie/onb-cashback.json"
+                title="Рынок прогнозов"
+                subtitle="Предсказывай исходы реальных событий и забирай выигрыш — прямо в Telegram."
+              />
+            )}
+            {tab === "markets" && (
+              <Screen
+                src="/lottie/liberty.json"
+                title="Рынки"
+                subtitle="Скоро здесь появятся события: спорт, крипта, политика и не только."
+              />
+            )}
+            {tab === "profile" && (
+              <Screen
+                src="/lottie/vip-crown.json"
+                title={name}
+                subtitle="Баланс, история ставок и статистика прогнозиста."
+              />
+            )}
+          </div>
         </div>
       </main>
 
