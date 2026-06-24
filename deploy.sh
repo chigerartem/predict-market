@@ -7,13 +7,15 @@ REMOTE="${REMOTE:-kopix-cashback}"
 DIR="${DIR:-kopix-predict}"
 
 echo "→ sync source to $REMOTE:~/$DIR"
+# Clear source dirs first so deletions propagate (tar extract never removes files).
+ssh "$REMOTE" "mkdir -p ~/$DIR && rm -rf ~/$DIR/web/src ~/$DIR/web/public ~/$DIR/internal ~/$DIR/cmd ~/$DIR/migrations ~/$DIR/docs"
 tar czf - \
   --exclude=.git \
   --exclude=node_modules \
   --exclude=web/dist \
   --exclude='*.log' \
   --exclude=.env \
-  . | ssh "$REMOTE" "mkdir -p ~/$DIR && tar xzf - -C ~/$DIR"
+  . | ssh "$REMOTE" "tar xzf - -C ~/$DIR"
 
 echo "→ check .env exists on server"
 ssh "$REMOTE" "test -f ~/$DIR/.env" || {
