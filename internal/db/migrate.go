@@ -12,9 +12,14 @@ import (
 	"predict/migrations"
 )
 
+// migrationLockKey is an arbitrary constant identifying the session advisory lock
+// that serializes concurrent migrators (e.g. parallel test binaries).
+const migrationLockKey = int64(8274013)
+
 // Migrate applies all pending SQL migrations from the embedded migrations FS,
-// tracked in a schema_migrations table. It uses the simple query protocol so a
-// multi-statement migration file runs as a single batch.
+// tracked in a schema_migrations table. It holds a session advisory lock on a
+// single connection so concurrent callers don't race. The simple query protocol
+// lets a multi-statement migration file run as one batch.
 func Migrate(ctx context.Context, url string) error {
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
@@ -28,7 +33,18 @@ func Migrate(ctx context.Context, url string) error {
 	}
 	defer pool.Close()
 
-	if _, err := pool.Exec(ctx,
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		return err
+	}
+	defer conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationLockKey)
+
+	if _, err := conn.Exec(ctx,
 		`CREATE TABLE IF NOT EXISTS schema_migrations (
 			version    text PRIMARY KEY,
 			applied_at timestamptz NOT NULL DEFAULT now()
@@ -50,7 +66,7 @@ func Migrate(ctx context.Context, url string) error {
 
 	for _, name := range names {
 		var applied bool
-		if err := pool.QueryRow(ctx,
+		if err := conn.QueryRow(ctx,
 			`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, name,
 		).Scan(&applied); err != nil {
 			return err
@@ -64,7 +80,7 @@ func Migrate(ctx context.Context, url string) error {
 			return err
 		}
 
-		tx, err := pool.Begin(ctx)
+		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return err
 		}

@@ -50,10 +50,29 @@ type Posting struct {
 	Entries        []Entry
 }
 
-// Post writes a balanced double-entry transaction and updates account balances
-// atomically, returning the ledger transaction id. The database enforces the
-// zero-sum and non-negative-balance invariants as a backstop.
+// Post writes a balanced double-entry transaction in its own database
+// transaction and returns the ledger transaction id.
 func Post(ctx context.Context, pool *pgxpool.Pool, p Posting) (int64, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	id, err := PostTx(ctx, tx, p)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err // deferred zero-sum trigger and CHECK constraints fire here
+	}
+	return id, nil
+}
+
+// PostTx writes a balanced double-entry transaction within an existing database
+// transaction, so ledger writes compose atomically with other domain writes
+// (e.g. inserting a bet in the same tx). The caller is responsible for committing.
+func PostTx(ctx context.Context, tx pgx.Tx, p Posting) (int64, error) {
 	if len(p.Entries) == 0 {
 		return 0, ErrNoEntries
 	}
@@ -64,12 +83,6 @@ func Post(ctx context.Context, pool *pgxpool.Pool, p Posting) (int64, error) {
 	if sum != 0 {
 		return 0, fmt.Errorf("%w: sum=%d", ErrUnbalanced, sum)
 	}
-
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback(ctx)
 
 	if p.IdempotencyKey != "" {
 		var existing int64
@@ -117,9 +130,6 @@ func Post(ctx context.Context, pool *pgxpool.Pool, p Posting) (int64, error) {
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return 0, err // deferred zero-sum trigger and CHECK constraints fire here
-	}
 	return txID, nil
 }
 
@@ -147,5 +157,13 @@ func EnsureUserBalance(ctx context.Context, pool *pgxpool.Pool, userID int64) (i
 		 ON CONFLICT (owner_user_id, type) WHERE owner_user_id IS NOT NULL
 		 DO UPDATE SET owner_user_id = accounts.owner_user_id
 		 RETURNING id`, userID).Scan(&id)
+	return id, err
+}
+
+// UserBalanceID returns the user's existing balance account id within a tx.
+func UserBalanceID(ctx context.Context, tx pgx.Tx, userID int64) (int64, error) {
+	var id int64
+	err := tx.QueryRow(ctx,
+		`SELECT id FROM accounts WHERE owner_user_id = $1 AND type = 'USER_BALANCE'`, userID).Scan(&id)
 	return id, err
 }

@@ -1,0 +1,129 @@
+// Package markets manages prediction markets and their outcomes.
+package markets
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// OutcomeInput describes an outcome when creating a market.
+type OutcomeInput struct {
+	Title            string
+	OddsMilli        int64 // decimal odds x1000 (e.g. 2500 = 2.5)
+	MaxLiabilityNano int64 // 0 = no cap
+}
+
+// Outcome is a possible result of a market.
+type Outcome struct {
+	ID               int64
+	MarketID         int64
+	Title            string
+	OddsMilli        int64
+	MaxLiabilityNano *int64
+	TotalStakeNano   int64
+	TotalPayoutNano  int64
+}
+
+// Market is a prediction market with its outcomes.
+type Market struct {
+	ID                int64
+	Source            string
+	Title             string
+	Category          string
+	Status            string
+	CloseTime         *time.Time
+	ResolvedOutcomeID *int64
+	Outcomes          []Outcome
+}
+
+// CreateMarket creates a market with its outcomes (admin action).
+func CreateMarket(ctx context.Context, pool *pgxpool.Pool, title, category string, closeTime *time.Time, outs []OutcomeInput) (Market, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Market{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	m := Market{Title: title, Category: category, CloseTime: closeTime}
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO markets (source, title, category, close_time)
+		 VALUES ('manual', $1, NULLIF($2, ''), $3)
+		 RETURNING id, source, status`,
+		title, category, closeTime).Scan(&m.ID, &m.Source, &m.Status); err != nil {
+		return Market{}, err
+	}
+
+	for i, o := range outs {
+		var maxLiab *int64
+		if o.MaxLiabilityNano > 0 {
+			v := o.MaxLiabilityNano
+			maxLiab = &v
+		}
+		var oc Outcome
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO outcomes (market_id, title, odds_milli, max_liability_nano, sort_order)
+			 VALUES ($1, $2, $3, $4, $5)
+			 RETURNING id, market_id, title, odds_milli, total_stake_nano, total_payout_nano`,
+			m.ID, o.Title, o.OddsMilli, maxLiab, i).Scan(
+			&oc.ID, &oc.MarketID, &oc.Title, &oc.OddsMilli, &oc.TotalStakeNano, &oc.TotalPayoutNano); err != nil {
+			return Market{}, err
+		}
+		oc.MaxLiabilityNano = maxLiab
+		m.Outcomes = append(m.Outcomes, oc)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Market{}, err
+	}
+	return m, nil
+}
+
+// GetMarket loads a market and its outcomes by id.
+func GetMarket(ctx context.Context, pool *pgxpool.Pool, id int64) (Market, error) {
+	var m Market
+	if err := pool.QueryRow(ctx,
+		`SELECT id, source, title, COALESCE(category, ''), status, close_time, resolved_outcome_id
+		   FROM markets WHERE id = $1`, id).Scan(
+		&m.ID, &m.Source, &m.Title, &m.Category, &m.Status, &m.CloseTime, &m.ResolvedOutcomeID); err != nil {
+		return Market{}, err
+	}
+
+	rows, err := pool.Query(ctx,
+		`SELECT id, market_id, title, odds_milli, max_liability_nano, total_stake_nano, total_payout_nano
+		   FROM outcomes WHERE market_id = $1 ORDER BY sort_order, id`, id)
+	if err != nil {
+		return Market{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var oc Outcome
+		if err := rows.Scan(&oc.ID, &oc.MarketID, &oc.Title, &oc.OddsMilli,
+			&oc.MaxLiabilityNano, &oc.TotalStakeNano, &oc.TotalPayoutNano); err != nil {
+			return Market{}, err
+		}
+		m.Outcomes = append(m.Outcomes, oc)
+	}
+	return m, rows.Err()
+}
+
+// ListOpenMarkets returns markets currently open for betting (without outcomes).
+func ListOpenMarkets(ctx context.Context, pool *pgxpool.Pool) ([]Market, error) {
+	rows, err := pool.Query(ctx,
+		`SELECT id, source, title, COALESCE(category, ''), status, close_time
+		   FROM markets WHERE status = 'OPEN' ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Market
+	for rows.Next() {
+		var m Market
+		if err := rows.Scan(&m.ID, &m.Source, &m.Title, &m.Category, &m.Status, &m.CloseTime); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
