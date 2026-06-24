@@ -76,8 +76,6 @@ const PLACEHOLDER_ME: MeResponse = {
   user: { id: "", tg_id: 0, tg_username: null, name: "", ref_code: "", vip_tier: "bronze", language: "en", onboarded: true },
   partner_id: null,
   ton_balance: "0",
-  balances: [],
-  exchanges: [],
 };
 
 function loadCachedMe(): MeResponse | null {
