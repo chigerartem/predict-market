@@ -131,10 +131,10 @@ export default function App() {
   // Владелец видит онбординг при каждом открытии; в рамках одной сессии его можно
   // закрыть кнопкой, при переоткрытии Mini App покажется снова.
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
-  // Высота клавиатуры (разница Telegram viewportStableHeight − viewportHeight).
-  // Нав смещаем вниз ровно на неё, чтобы он остался на своём абсолютном месте за
-  // клавиатурой, а не прилипал к её верху (Telegram на iOS сжимает WebView).
-  const [kbOffset, setKbOffset] = useState(0);
+  // Открыта ли клавиатура (есть ли в фокусе текстовое поле). Тогда полностью прячем
+  // нижний нав: на iOS Telegram fixed-нав иначе всплывает над клавиатурой. Детект по
+  // focusin/focusout — надёжнее viewport-эвристик, которые в Telegram не срабатывали.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   const finishOnboarding = useCallback(() => {
     setOnboardingDismissed(true);
@@ -190,20 +190,23 @@ export default function App() {
     reload();
   }, [reload]);
 
-  // Telegram сжимает WebView при открытии клавиатуры (viewportHeight < stable).
-  // Запоминаем эту разницу и опускаем нав на неё (см. style ниже), чтобы он остался
-  // ровно на своём месте за клавиатурой и не «прыгал» к её верху.
+  // Прячем нав, пока в фокусе текстовое поле (клавиатура открыта). focusin/focusout
+  // всплывают до document, поэтому ловим любое поле в любом компоненте.
   useEffect(() => {
-    const tg = window.Telegram?.WebApp;
-    if (!tg?.onEvent) return;
-    const update = () => {
-      const stable = tg.viewportStableHeight ?? 0;
-      const cur = tg.viewportHeight ?? 0;
-      setKbOffset(stable > 0 && cur > 0 ? Math.max(0, stable - cur) : 0);
+    const isField = (el: EventTarget | null) =>
+      el instanceof HTMLElement && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+    const onIn = (e: FocusEvent) => {
+      if (isField(e.target)) setKeyboardOpen(true);
     };
-    update();
-    tg.onEvent("viewportChanged", update);
-    return () => tg.offEvent?.("viewportChanged", update);
+    const onOut = (e: FocusEvent) => {
+      if (isField(e.target)) setKeyboardOpen(false);
+    };
+    document.addEventListener("focusin", onIn);
+    document.addEventListener("focusout", onOut);
+    return () => {
+      document.removeEventListener("focusin", onIn);
+      document.removeEventListener("focusout", onOut);
+    };
   }, []);
 
   // ── Гейт онбординга. Вычисляем ДО color/scroll-эффектов: пока показан
@@ -316,8 +319,11 @@ export default function App() {
           Полноширинная подложка home-indicator не нужна: вокруг острова виден
           navy-фон контента/main (низ всегда тёмный, см. apply). */}
       <nav
-        className="fixed inset-x-0 z-40 flex justify-center px-5"
-        style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + 10px - ${kbOffset}px)` }}
+        className={
+          "fixed inset-x-0 z-40 flex justify-center px-5 transition-opacity duration-150 " +
+          (keyboardOpen ? "pointer-events-none opacity-0" : "opacity-100")
+        }
+        style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 10px)" }}
       >
         <div className="relative flex w-full max-w-sm rounded-[26px] border border-white/10 bg-[#11151C]/85 p-1.5 shadow-[0_12px_40px_-10px_rgba(0,0,0,0.8)] backdrop-blur-2xl">
           {/* Скользящая голубая плашка под активной вкладкой: ОДИН общий элемент,
