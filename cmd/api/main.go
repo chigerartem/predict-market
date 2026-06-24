@@ -11,9 +11,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"predict/internal/db"
 	"predict/internal/deposits"
 	"predict/internal/httpapi"
+	"predict/internal/polymarket"
 	"predict/internal/rates"
 )
 
@@ -63,6 +66,16 @@ func main() {
 	if err := srv.RegisterWebhook(ctx, os.Getenv("TG_WEBHOOK_URL"), os.Getenv("TG_WEBHOOK_SECRET")); err != nil {
 		log.Printf("webhook registration failed (continuing): %v", err)
 	}
+
+	// Background: mirror real Polymarket markets into our DB on an interval.
+	if envBool("POLY_INGEST_ENABLED", true) {
+		go runIngestLoop(ctx, pool,
+			int(envInt("POLY_INGEST_LIMIT", 200)),
+			envFloat("HOUSE_EDGE", 0.05),
+			envFloat("POLY_MAX_PROB", 0.97),
+			envInt("POLY_INGEST_INTERVAL_SEC", 600))
+	}
+
 	httpSrv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      srv.Handler(),
@@ -78,4 +91,44 @@ func envFloat(key string, def float64) float64 {
 		return v
 	}
 	return def
+}
+
+func envInt(key string, def int64) int64 {
+	if v, err := strconv.ParseInt(os.Getenv(key), 10, 64); err == nil {
+		return v
+	}
+	return def
+}
+
+func envBool(key string, def bool) bool {
+	switch os.Getenv(key) {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	default:
+		return def
+	}
+}
+
+func runIngestLoop(ctx context.Context, pool *pgxpool.Pool, limit int, edge, maxProb float64, intervalSec int64) {
+	tick := func() {
+		n, err := polymarket.Ingest(ctx, pool, limit, edge, maxProb)
+		if err != nil {
+			log.Printf("polymarket ingest: %v", err)
+			return
+		}
+		log.Printf("polymarket ingest: %d markets", n)
+	}
+	tick() // once at startup
+	t := time.NewTicker(time.Duration(intervalSec) * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			tick()
+		}
+	}
 }

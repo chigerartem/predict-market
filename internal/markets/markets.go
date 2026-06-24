@@ -3,8 +3,10 @@ package markets
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -78,6 +80,70 @@ func CreateMarket(ctx context.Context, pool *pgxpool.Pool, title, category strin
 		return Market{}, err
 	}
 	return m, nil
+}
+
+// UpsertExternal mirrors a market from an external source (e.g. Polymarket) into
+// our tables, keyed by (source, source_id) for idempotency. First sight: creates
+// the market and outcomes. Later runs: refreshes the title, close time, and each
+// outcome's odds (matched by sort_order). Bets keep the odds they were placed at,
+// so refreshing market odds never disturbs existing bets.
+func UpsertExternal(ctx context.Context, pool *pgxpool.Pool, source, sourceID, title, category string, closeTime *time.Time, outs []OutcomeInput) error {
+	if len(outs) == 0 {
+		return errors.New("markets: no outcomes")
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var marketID int64
+	err = tx.QueryRow(ctx,
+		`SELECT id FROM markets WHERE source = $1 AND source_id = $2`, source, sourceID).Scan(&marketID)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO markets (source, source_id, title, category, close_time)
+			 VALUES ($1, $2, $3, NULLIF($4, ''), $5)
+			 RETURNING id`,
+			source, sourceID, title, category, closeTime).Scan(&marketID); err != nil {
+			return err
+		}
+		for i, o := range outs {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO outcomes (market_id, title, odds_milli, sort_order)
+				 VALUES ($1, $2, $3, $4)`,
+				marketID, o.Title, o.OddsMilli, i); err != nil {
+				return err
+			}
+		}
+	case err == nil:
+		if _, err := tx.Exec(ctx,
+			`UPDATE markets SET title = $2, close_time = $3, updated_at = now() WHERE id = $1`,
+			marketID, title, closeTime); err != nil {
+			return err
+		}
+		for i, o := range outs {
+			ct, err := tx.Exec(ctx,
+				`UPDATE outcomes SET odds_milli = $3 WHERE market_id = $1 AND sort_order = $2`,
+				marketID, i, o.OddsMilli)
+			if err != nil {
+				return err
+			}
+			if ct.RowsAffected() == 0 {
+				if _, err := tx.Exec(ctx,
+					`INSERT INTO outcomes (market_id, title, odds_milli, sort_order)
+					 VALUES ($1, $2, $3, $4)`,
+					marketID, o.Title, o.OddsMilli, i); err != nil {
+					return err
+				}
+			}
+		}
+	default:
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 // GetMarket loads a market and its outcomes by id.

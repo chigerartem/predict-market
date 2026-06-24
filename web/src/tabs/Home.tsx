@@ -106,10 +106,12 @@ function MarketCard({ market }: { market: Market }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-[#11151C] p-3.5">
       <div className="mb-2.5 flex items-center gap-2 text-[11px] text-neutral-500">
-        <span className="rounded-md bg-white/5 px-2 py-0.5 font-medium text-neutral-300">
-          {CATEGORY_LABEL[market.category] ?? market.category}
-        </span>
-        {market.close_time && <span>· до {fmtDate(market.close_time)}</span>}
+        {market.category && (
+          <span className="rounded-md bg-white/5 px-2 py-0.5 font-medium text-neutral-300">
+            {CATEGORY_LABEL[market.category] ?? market.category}
+          </span>
+        )}
+        {market.close_time && <span>до {fmtDate(market.close_time)}</span>}
       </div>
 
       <div className="mb-3 text-sm font-semibold leading-snug text-white">{market.title}</div>
