@@ -1,0 +1,31 @@
+# --- Secrets / env ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# --- Go ---
+/bin/
+/build/
+*.exe
+*.test
+*.out
+vendor/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+.vite/
+*.local
+
+# --- Logs / tmp ---
+*.log
+tmp/
+.DS_Store
+
+# --- IDE ---
+.idea/
+.vscode/
+*.swp
