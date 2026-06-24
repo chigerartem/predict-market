@@ -81,6 +81,18 @@ const en = {
   "wd.submit": "Withdraw",
   "wd.soon": "Withdrawals open soon — this is a preview.",
 
+  // ── Ставка (Bet) ───────────────────────────────────────────────────────
+  "bet.title": "Place a bet",
+  "bet.amount": "Stake",
+  "bet.payout": "Payout if you win",
+  "bet.available": "Available",
+  "bet.place": "Place bet",
+  "bet.min": "Minimum 0.1 TON",
+  "bet.insufficient": "Not enough balance — top up first",
+  "bet.placing": "Placing…",
+  "bet.success": "Bet placed!",
+  "bet.error": "Couldn't place the bet",
+
   // ── Главная (Home) ─────────────────────────────────────────────────────
   "home.greeting": "Hello,",
   "home.yourCashback": "Your cashback",
@@ -340,6 +352,18 @@ const ru: Record<TKey, string> = {
   "wd.addressPlaceholder": "Вставьте ваш TON-адрес",
   "wd.submit": "Вывести",
   "wd.soon": "Вывод откроется скоро — это превью.",
+
+  // ── Ставка (Bet) ───────────────────────────────────────────────────────
+  "bet.title": "Сделать ставку",
+  "bet.amount": "Сумма ставки",
+  "bet.payout": "Выплата при выигрыше",
+  "bet.available": "Доступно",
+  "bet.place": "Поставить",
+  "bet.min": "Минимум 0.1 TON",
+  "bet.insufficient": "Недостаточно средств — пополните баланс",
+  "bet.placing": "Ставим…",
+  "bet.success": "Ставка принята!",
+  "bet.error": "Не удалось поставить ставку",
 
   // ── Главная (Home) ─────────────────────────────────────────────────────
   "home.greeting": "Здравствуйте,",

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { MeResponse } from "../api";
-import { fetchMarkets, fetchMe, type Market } from "../realapi";
+import { fetchMarkets, fetchMe, type Market, type MarketOutcome } from "../realapi";
 import { fmtTon } from "../format";
 import { useT } from "../i18n";
 import TonIcon from "../components/TonIcon";
 import DepositModal from "../components/DepositModal";
 import WithdrawModal from "../components/WithdrawModal";
+import BetModal from "../components/BetModal";
 
 type Props = {
   me: MeResponse;
@@ -38,6 +39,7 @@ export default function Home(_props: Props) {
   const t = useT();
   const [deposit, setDeposit] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
+  const [bet, setBet] = useState<{ market: Market; outcome: MarketOutcome } | null>(null);
   const [cat, setCat] = useState("all");
   const [search, setSearch] = useState("");
 
@@ -140,7 +142,11 @@ export default function Home(_props: Props) {
         ) : (
           <div className="space-y-3">
             {filtered.map((m) => (
-              <MarketCard key={m.id} market={m} />
+              <MarketCard
+                key={m.id}
+                market={m}
+                onPick={(market, outcome) => setBet({ market, outcome })}
+              />
             ))}
           </div>
         )}
@@ -148,11 +154,25 @@ export default function Home(_props: Props) {
 
       <DepositModal open={deposit} onClose={() => setDeposit(false)} onSuccess={loadBalance} />
       <WithdrawModal open={withdraw} onClose={() => setWithdraw(false)} balanceTon={String(balanceTon)} />
+      <BetModal
+        open={!!bet}
+        onClose={() => setBet(null)}
+        market={bet?.market ?? null}
+        outcome={bet?.outcome ?? null}
+        balanceTon={balanceTon}
+        onSuccess={loadBalance}
+      />
     </div>
   );
 }
 
-function MarketCard({ market }: { market: Market }) {
+function MarketCard({
+  market,
+  onPick,
+}: {
+  market: Market;
+  onPick: (market: Market, outcome: MarketOutcome) => void;
+}) {
   return (
     <div className="rounded-2xl border border-white/10 bg-[#11151C] p-3.5">
       <div className="mb-2.5 flex items-center gap-2 text-[11px] text-neutral-500">
@@ -170,6 +190,7 @@ function MarketCard({ market }: { market: Market }) {
         {market.outcomes.map((o) => (
           <button
             key={o.id}
+            onClick={() => onPick(market, o)}
             className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-left transition active:scale-[0.98] hover:bg-white/[0.08]"
           >
             <div className="truncate text-xs text-neutral-400">{o.title}</div>

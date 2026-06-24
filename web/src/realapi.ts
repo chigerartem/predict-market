@@ -60,3 +60,30 @@ export async function fetchStarsQuote(stars: number): Promise<number> {
   const d = (await r.json()) as { ton_nano: number };
   return d.ton_nano;
 }
+
+export type Bet = {
+  id: number;
+  market_id: number;
+  outcome_id: number;
+  stake_nano: number;
+  odds_milli: number;
+  payout_nano: number;
+  status: string;
+  placed_at: string;
+};
+
+// placeBet stakes stakeNano on outcomeId at its current odds. The server moves the
+// stake to escrow and reserves the house payout in one transaction; it rejects the
+// bet if the balance or the house can't cover it. Throws with the server message.
+export async function placeBet(outcomeId: number, stakeNano: number): Promise<Bet> {
+  const r = await fetch(`${API_BASE}/api/bets`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ outcome_id: outcomeId, stake_nano: stakeNano }),
+  });
+  if (!r.ok) {
+    const e = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(e.error || `bet ${r.status}`);
+  }
+  return (await r.json()) as Bet;
+}

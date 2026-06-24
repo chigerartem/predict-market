@@ -153,7 +153,10 @@ func UpsertExternal(ctx context.Context, pool *pgxpool.Pool, source, sourceID, t
 func CloseStaleExternal(ctx context.Context, pool *pgxpool.Pool, source string, activeIDs []string) (int64, error) {
 	ct, err := pool.Exec(ctx,
 		`UPDATE markets SET status = 'CLOSED', updated_at = now()
-		  WHERE source = $1 AND status = 'OPEN' AND NOT (source_id = ANY($2))`,
+		  WHERE source = $1 AND status = 'OPEN' AND NOT (source_id = ANY($2))
+		    AND NOT EXISTS (
+		      SELECT 1 FROM bets b WHERE b.market_id = markets.id AND b.status = 'PLACED'
+		    )`,
 		source, activeIDs)
 	if err != nil {
 		return 0, err
