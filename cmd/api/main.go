@@ -77,6 +77,11 @@ func main() {
 			envInt("POLY_INGEST_INTERVAL_SEC", 600))
 	}
 
+	// Background: settle our markets that resolved on Polymarket (pays/charges bets).
+	if envBool("POLY_RESOLVE_ENABLED", true) {
+		go runResolveLoop(ctx, pool, envInt("POLY_RESOLVE_INTERVAL_SEC", 300))
+	}
+
 	httpSrv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      srv.Handler(),
@@ -122,6 +127,30 @@ func runIngestLoop(ctx context.Context, pool *pgxpool.Pool, limit int, edge, max
 		log.Printf("polymarket ingest: %d markets", n)
 	}
 	tick() // once at startup
+	t := time.NewTicker(time.Duration(intervalSec) * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			tick()
+		}
+	}
+}
+
+func runResolveLoop(ctx context.Context, pool *pgxpool.Pool, intervalSec int64) {
+	tick := func() {
+		n, err := polymarket.ResolveSettled(ctx, pool)
+		if err != nil {
+			log.Printf("polymarket resolve: %v", err)
+			return
+		}
+		if n > 0 {
+			log.Printf("polymarket resolve: settled %d markets", n)
+		}
+	}
+	tick()
 	t := time.NewTicker(time.Duration(intervalSec) * time.Second)
 	defer t.Stop()
 	for {

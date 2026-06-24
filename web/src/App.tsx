@@ -193,13 +193,27 @@ export default function App() {
   // Прячем нав, пока в фокусе текстовое поле (клавиатура открыта). focusin/focusout
   // всплывают до document, поэтому ловим любое поле в любом компоненте.
   useEffect(() => {
+    const tg = window.Telegram?.WebApp;
     const isField = (el: EventTarget | null) =>
       el instanceof HTMLElement && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+    const setBg = (c: string) => {
+      try {
+        tg?.setBackgroundColor?.(c);
+      } catch {
+        /* старый клиент без setBackgroundColor */
+      }
+    };
     const onIn = (e: FocusEvent) => {
-      if (isField(e.target)) setKeyboardOpen(true);
+      if (isField(e.target)) {
+        setKeyboardOpen(true);
+        setBg("#0A0E16"); // под клавиатурой — тёмный, иначе проступает голубой фон
+      }
     };
     const onOut = (e: FocusEvent) => {
-      if (isField(e.target)) setKeyboardOpen(false);
+      if (isField(e.target)) {
+        setKeyboardOpen(false);
+        setBg("#5CCBFF"); // вернуть голубой (верхний overscroll вкладок)
+      }
     };
     document.addEventListener("focusin", onIn);
     document.addEventListener("focusout", onOut);

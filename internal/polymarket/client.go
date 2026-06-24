@@ -116,3 +116,30 @@ func fetchPage(ctx context.Context, limit, offset int) ([]Market, error) {
 	}
 	return out, nil
 }
+
+// FetchMarketByCondition fetches a single market by its conditionId (our source_id).
+// Returns ok=false if Polymarket returns no such market.
+func FetchMarketByCondition(ctx context.Context, conditionID string) (Market, bool, error) {
+	url := fmt.Sprintf("%s/markets?condition_ids=%s", gammaBase, conditionID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return Market{}, false, err
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return Market{}, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Market{}, false, fmt.Errorf("polymarket: gamma status %d", resp.StatusCode)
+	}
+	var out []Market
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return Market{}, false, err
+	}
+	if len(out) == 0 {
+		return Market{}, false, nil
+	}
+	return out[0], true, nil
+}

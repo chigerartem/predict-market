@@ -106,8 +106,6 @@ export default function Home(_props: Props) {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          onFocus={() => setViewportColor("#0A0E16")}
-          onBlur={() => setViewportColor("#5CCBFF")}
           placeholder={t("home.search")}
           className="mb-3 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm text-white outline-none placeholder:text-neutral-500"
         />
@@ -210,13 +208,3 @@ function fmtDate(iso: string): string {
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 }
 
-// Красит фон viewport Telegram (виден под полупрозрачной клавиатурой и при
-// overscroll). На фокус поиска — тёмный, иначе под клавиатурой проступает голубой
-// фон главной; на blur возвращаем голубой (как красит App для вкладки home).
-function setViewportColor(color: string) {
-  try {
-    window.Telegram?.WebApp?.setBackgroundColor?.(color);
-  } catch {
-    /* старый клиент без setBackgroundColor */
-  }
-}
