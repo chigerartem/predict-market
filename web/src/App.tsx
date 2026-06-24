@@ -131,6 +131,9 @@ export default function App() {
   // Владелец видит онбординг при каждом открытии; в рамках одной сессии его можно
   // закрыть кнопкой, при переоткрытии Mini App покажется снова.
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  // Клавиатура открыта (определяем по сжатию visualViewport) — тогда прячем нижний
+  // нав: на iOS Telegram fixed-нав иначе прилипает к верху клавиатуры и «прыгает».
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   const finishOnboarding = useCallback(() => {
     setOnboardingDismissed(true);
@@ -185,6 +188,16 @@ export default function App() {
     requestAnimationFrame(applyInitialColors);
     reload();
   }, [reload]);
+
+  // Детект клавиатуры: visualViewport заметно сжимается, когда она открыта. Прячем
+  // нав, чтобы он не прилипал к её верху (iOS Telegram resize'ит WebView под клаву).
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => setKeyboardOpen(window.innerHeight - vv.height > 150);
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
+  }, []);
 
   // ── Гейт онбординга. Вычисляем ДО color/scroll-эффектов: пока показан
   //    онбординг, <main> не смонтирован, и эффекты должны перезапуститься, когда
@@ -296,7 +309,10 @@ export default function App() {
           Полноширинная подложка home-indicator не нужна: вокруг острова виден
           navy-фон контента/main (низ всегда тёмный, см. apply). */}
       <nav
-        className="fixed inset-x-0 z-40 flex justify-center px-5"
+        className={
+          "fixed inset-x-0 z-40 flex justify-center px-5 transition-opacity duration-200 " +
+          (keyboardOpen ? "pointer-events-none opacity-0" : "opacity-100")
+        }
         style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 10px)" }}
       >
         <div className="relative flex w-full max-w-sm rounded-[26px] border border-white/10 bg-[#11151C]/85 p-1.5 shadow-[0_12px_40px_-10px_rgba(0,0,0,0.8)] backdrop-blur-2xl">
