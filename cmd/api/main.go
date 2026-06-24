@@ -26,6 +26,7 @@ func main() {
 		webOrigin = "https://market.kopix.online"
 	}
 	devUserID, _ := strconv.ParseInt(os.Getenv("DEV_USER_ID"), 10, 64)
+	allowInsecure := os.Getenv("ALLOW_INSECURE_INITDATA") == "1"
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8000"
@@ -41,7 +42,10 @@ func main() {
 	}
 	defer pool.Close()
 
-	srv := httpapi.New(pool, botToken, webOrigin, devUserID)
+	if allowInsecure && botToken == "" {
+		log.Println("WARNING: ALLOW_INSECURE_INITDATA=1 and no TG_BOT_TOKEN — initData is NOT verified (testing only)")
+	}
+	srv := httpapi.New(pool, botToken, webOrigin, devUserID, allowInsecure)
 	httpSrv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      srv.Handler(),

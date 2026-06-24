@@ -6,16 +6,23 @@ interface TelegramHapticFeedback {
   selectionChanged(): void;
 }
 
+interface TelegramUser {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+}
+
 interface TelegramWebApp {
   initData: string;
+  initDataUnsafe?: { user?: TelegramUser };
   ready(): void;
   expand(): void;
+  disableVerticalSwipes?(): void;
   viewportHeight?: number;
   viewportStableHeight?: number;
-  themeParams?: { bg_color?: string };
   setHeaderColor?(color: string): void;
   setBackgroundColor?(color: string): void;
-  setBottomBarColor?(color: string): void;
   onEvent?(event: string, cb: () => void): void;
   HapticFeedback?: TelegramHapticFeedback;
 }

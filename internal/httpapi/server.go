@@ -19,15 +19,16 @@ import (
 
 // Server holds dependencies for the HTTP API.
 type Server struct {
-	pool      *pgxpool.Pool
-	botToken  string
-	webOrigin string
-	devUserID int64 // when > 0, used as a fallback identity for local development
+	pool          *pgxpool.Pool
+	botToken      string
+	webOrigin     string
+	devUserID     int64 // when > 0, fallback identity for local dev
+	allowInsecure bool  // when true and no bot token, accept initData WITHOUT verifying (testing only)
 }
 
 // New builds a Server.
-func New(pool *pgxpool.Pool, botToken, webOrigin string, devUserID int64) *Server {
-	return &Server{pool: pool, botToken: botToken, webOrigin: webOrigin, devUserID: devUserID}
+func New(pool *pgxpool.Pool, botToken, webOrigin string, devUserID int64, allowInsecure bool) *Server {
+	return &Server{pool: pool, botToken: botToken, webOrigin: webOrigin, devUserID: devUserID, allowInsecure: allowInsecure}
 }
 
 // Handler returns the configured HTTP handler (with CORS).
@@ -57,7 +58,17 @@ func (s *Server) auth(h authedHandler) http.HandlerFunc {
 func (s *Server) authenticate(r *http.Request) (int64, error) {
 	authz := r.Header.Get("Authorization")
 	if initData, ok := strings.CutPrefix(authz, "tma "); ok {
-		if u, err := validateInitData(initData, s.botToken, 24*time.Hour); err == nil {
+		var u TgUser
+		var err error
+		switch {
+		case s.botToken != "":
+			u, err = validateInitData(initData, s.botToken, 24*time.Hour)
+		case s.allowInsecure:
+			u, err = parseInitDataUnverified(initData) // testing only — no signature check
+		default:
+			err = errInvalidInitData
+		}
+		if err == nil {
 			if err := s.upsertUser(r.Context(), u); err != nil {
 				return 0, err
 			}

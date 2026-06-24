@@ -2,21 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --app-h: 100vh;
-}
-
+/* Static app height (set in main.tsx from Telegram viewportStableHeight) so iOS
+   inertial scroll doesn't recompute 100dvh and push the top out of view. */
 html,
 body,
 #root {
-  margin: 0;
-  height: 100%;
-  background: #0a0e16;
-  color: #e6eaf2;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  -webkit-tap-highlight-color: transparent;
+  height: 100vh;
+  height: 100dvh;
+  height: var(--app-h, 100dvh);
 }
 
-#root {
-  min-height: var(--app-h);
+html {
+  touch-action: manipulation; /* no double-tap zoom */
+  -webkit-text-size-adjust: 100%;
+  background: #0a0e16; /* must be on <html> so iOS rubber-band shows the dark theme */
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0a0e16;
+  color: #fff;
+  overscroll-behavior-y: none;
+}
+
+/* Hide scrollbars, keep scrolling */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Premium tactile press (Emil Kowalski): scale(0.97) on :active, GPU-only.
+   Intentionally outside @layer so it overrides Tailwind regardless of specificity. */
+@media (prefers-reduced-motion: no-preference) {
+  button,
+  [role="button"],
+  a,
+  summary,
+  .tappable {
+    transition-property: transform, opacity, color, background-color, border-color,
+      box-shadow, filter;
+    transition-duration: 160ms;
+    transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  button:not([disabled]):not([aria-disabled="true"]):active,
+  [role="button"]:not([aria-disabled="true"]):active,
+  summary:active,
+  .tappable:not([aria-disabled="true"]):active {
+    transform: scale(0.97);
+  }
 }

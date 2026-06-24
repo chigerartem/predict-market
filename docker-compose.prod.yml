@@ -34,6 +34,7 @@ services:
       TG_BOT_TOKEN: ${TG_BOT_TOKEN}
       WEB_ORIGIN: https://market.kopix.online
       PORT: "8000"
+      ALLOW_INSECURE_INITDATA: ${ALLOW_INSECURE_INITDATA:-}
     depends_on:
       db:
         condition: service_healthy

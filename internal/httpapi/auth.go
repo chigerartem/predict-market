@@ -78,3 +78,21 @@ func validateInitData(initData, botToken string, maxAge time.Duration) (TgUser, 
 	}
 	return TgUser{ID: u.ID, Username: u.Username, FirstName: u.FirstName}, nil
 }
+
+// parseInitDataUnverified extracts the Telegram user from initData WITHOUT verifying
+// the HMAC signature. Use ONLY for token-less testing (gated by ALLOW_INSECURE_INITDATA).
+func parseInitDataUnverified(initData string) (TgUser, error) {
+	parsed, err := url.ParseQuery(initData)
+	if err != nil {
+		return TgUser{}, errInvalidInitData
+	}
+	var u struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		FirstName string `json:"first_name"`
+	}
+	if err := json.Unmarshal([]byte(parsed.Get("user")), &u); err != nil || u.ID == 0 {
+		return TgUser{}, errInvalidInitData
+	}
+	return TgUser{ID: u.ID, Username: u.Username, FirstName: u.FirstName}, nil
+}
