@@ -45,6 +45,10 @@ export type MeResponse = {
     onboarded: boolean;
   };
   partner_id: string | null;
+  // Баланс пользователя в TON — основные «деньги» prediction-маркета: депозит
+  // подарками/TON/Stars оценивается и кредитуется сюда. Формат уточнится с бэком
+  // (вероятно наноTON-целые); пока mock — десятичная строка TON.
+  ton_balance: string;
   balances: ExchangeBalance[];
   exchanges: ExchangeAccount[];
 };
@@ -62,6 +66,7 @@ export const getMe = () =>
       onboarded: false,
     },
     partner_id: "demo",
+    ton_balance: "1250.50",
     balances: [
       { exchange: "bingx", accrued_usd: "152.40", paid_out_usd: "80.00", reserved_usd: "0", available_usd: "72.40", native_credited_usd: "152.40" },
       { exchange: "bitunix", accrued_usd: "43.10", paid_out_usd: "0", reserved_usd: "0", available_usd: "43.10", native_credited_usd: "43.10" },

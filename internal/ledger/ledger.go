@@ -26,6 +26,7 @@ const (
 	TypeGiftInventory    = "GIFT_INVENTORY"
 	TypeExternalTON      = "EXTERNAL_TON"
 	TypeExternalGift     = "EXTERNAL_GIFT"
+	TypeExternalStars    = "EXTERNAL_STARS"
 )
 
 var (

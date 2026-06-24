@@ -45,6 +45,31 @@ const en = {
   "common.close": "Close",
   "common.loading": "Loading…",
   "common.soon": "soon",
+  "common.back": "Back",
+
+  // ── Баланс / Пополнение / Вывод ────────────────────────────────────────
+  "home.yourBalance": "Your balance",
+  "home.deposit": "Deposit",
+  "home.withdraw": "Withdraw",
+
+  "dep.title": "Top up balance",
+  "dep.subtitle": "Choose how to deposit",
+  "dep.gifts": "Telegram Gifts",
+  "dep.giftsDesc": "Send a gift to the bot — we value it and credit TON",
+  "dep.ton": "TON",
+  "dep.tonDesc": "Top up from any TON wallet",
+  "dep.stars": "Telegram Stars",
+  "dep.starsDesc": "Pay with Stars",
+  "dep.gettingReady": "We're finishing this method — it goes live soon.",
+
+  "wd.title": "Withdraw",
+  "wd.available": "Available",
+  "wd.amount": "Amount",
+  "wd.max": "Max",
+  "wd.address": "TON wallet address",
+  "wd.addressPlaceholder": "Paste your TON address",
+  "wd.submit": "Withdraw",
+  "wd.soon": "Withdrawals open soon — this is a preview.",
 
   // ── Главная (Home) ─────────────────────────────────────────────────────
   "home.greeting": "Hello,",
@@ -270,6 +295,31 @@ const ru: Record<TKey, string> = {
   "common.close": "Закрыть",
   "common.loading": "Загрузка…",
   "common.soon": "скоро",
+  "common.back": "Назад",
+
+  // ── Баланс / Пополнение / Вывод ────────────────────────────────────────
+  "home.yourBalance": "Ваш баланс",
+  "home.deposit": "Пополнить",
+  "home.withdraw": "Вывести",
+
+  "dep.title": "Пополнить баланс",
+  "dep.subtitle": "Выберите способ пополнения",
+  "dep.gifts": "Telegram-подарки",
+  "dep.giftsDesc": "Отправьте подарок боту — оценим и зачислим TON",
+  "dep.ton": "TON",
+  "dep.tonDesc": "Пополнить с любого TON-кошелька",
+  "dep.stars": "Telegram Stars",
+  "dep.starsDesc": "Оплатить звёздами",
+  "dep.gettingReady": "Дорабатываем этот способ — скоро включим.",
+
+  "wd.title": "Вывести",
+  "wd.available": "Доступно",
+  "wd.amount": "Сумма",
+  "wd.max": "Макс",
+  "wd.address": "Адрес TON-кошелька",
+  "wd.addressPlaceholder": "Вставьте ваш TON-адрес",
+  "wd.submit": "Вывести",
+  "wd.soon": "Вывод откроется скоро — это превью.",
 
   // ── Главная (Home) ─────────────────────────────────────────────────────
   "home.greeting": "Здравствуйте,",

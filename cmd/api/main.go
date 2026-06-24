@@ -46,6 +46,9 @@ func main() {
 		log.Println("WARNING: ALLOW_INSECURE_INITDATA=1 and no TG_BOT_TOKEN — initData is NOT verified (testing only)")
 	}
 	srv := httpapi.New(pool, botToken, webOrigin, devUserID, allowInsecure)
+	if err := srv.RegisterWebhook(ctx, os.Getenv("TG_WEBHOOK_URL"), os.Getenv("TG_WEBHOOK_SECRET")); err != nil {
+		log.Printf("webhook registration failed (continuing): %v", err)
+	}
 	httpSrv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      srv.Handler(),
