@@ -55,5 +55,7 @@ if ! grep -q "cashback.kopix.online" "${DYN}.new" || ! grep -q "predict-web" "${
   exit 1
 fi
 
-mv "${DYN}.new" "$DYN"
+# Write in place (preserve inode) so Traefik's single-file bind mount sees it.
+cat "${DYN}.new" > "$DYN"
+rm -f "${DYN}.new"
 echo "attached predict routers (backup kept); traefik will hot-reload"
