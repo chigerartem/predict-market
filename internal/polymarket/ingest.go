@@ -37,15 +37,20 @@ func oddsFromProb(p, edge float64) int64 {
 // computing our odds from Polymarket's implied probabilities with the given house
 // edge. Returns how many markets were imported/updated. Best-effort per market: a
 // bad row is skipped, not fatal.
-func Ingest(ctx context.Context, pool *pgxpool.Pool, limit int, edge, maxProb float64) (int, error) {
+func Ingest(ctx context.Context, pool *pgxpool.Pool, limit int, edge, maxProb, minVol24h float64) (int, error) {
 	mkts, err := FetchMarkets(ctx, limit)
 	if err != nil {
 		return 0, err
 	}
 
+	active := make([]string, 0, len(mkts))
 	count := 0
 	for _, pm := range mkts {
 		if pm.Closed || pm.Archived || !pm.Active || !pm.EnableOrderBook {
+			continue
+		}
+		// Только рынки, где реально торгуют сейчас — свежая, надёжная цена для дома.
+		if minVol24h > 0 && pm.Volume24hr < minVol24h {
 			continue
 		}
 		names, prices, err := pm.ParsedOutcomes()
@@ -82,8 +87,21 @@ func Ingest(ctx context.Context, pool *pgxpool.Pool, limit int, edge, maxProb fl
 			log.Printf("polymarket ingest upsert %s: %v", pm.ConditionID, err)
 			continue
 		}
+		active = append(active, pm.ConditionID)
 		count++
 	}
+
+	// Закрываем рынки, выпавшие из выборки (объём упал ниже порога / закрылись на
+	// Polymarket): иначе зомби-рынок висит OPEN с устаревшей ценой — риск снайпинга.
+	// Только если выборка непустая (иначе сетевой сбой закрыл бы всё).
+	if len(active) > 0 {
+		if n, err := markets.CloseStaleExternal(ctx, pool, "polymarket", active); err != nil {
+			log.Printf("polymarket close stale: %v", err)
+		} else if n > 0 {
+			log.Printf("polymarket: closed %d stale markets", n)
+		}
+	}
+
 	return count, nil
 }
 

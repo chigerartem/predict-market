@@ -73,6 +73,7 @@ func main() {
 			int(envInt("POLY_INGEST_LIMIT", 1000)),
 			envFloat("HOUSE_EDGE", 0.05),
 			envFloat("POLY_MAX_PROB", 0.97),
+			envFloat("POLY_MIN_VOL24H", 50000),
 			envInt("POLY_INGEST_INTERVAL_SEC", 600))
 	}
 
@@ -111,9 +112,9 @@ func envBool(key string, def bool) bool {
 	}
 }
 
-func runIngestLoop(ctx context.Context, pool *pgxpool.Pool, limit int, edge, maxProb float64, intervalSec int64) {
+func runIngestLoop(ctx context.Context, pool *pgxpool.Pool, limit int, edge, maxProb, minVol24h float64, intervalSec int64) {
 	tick := func() {
-		n, err := polymarket.Ingest(ctx, pool, limit, edge, maxProb)
+		n, err := polymarket.Ingest(ctx, pool, limit, edge, maxProb, minVol24h)
 		if err != nil {
 			log.Printf("polymarket ingest: %v", err)
 			return

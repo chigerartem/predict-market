@@ -28,7 +28,9 @@ type Market struct {
 	Closed          bool    `json:"closed"`
 	Archived        bool    `json:"archived"`
 	EnableOrderBook bool    `json:"enableOrderBook"`
-	VolumeNum       float64 `json:"volumeNum"`
+	VolumeNum       float64 `json:"volumeNum"`    // lifetime volume
+	Volume24hr      float64 `json:"volume24hr"`   // last-24h volume — "active right now"
+	LiquidityNum    float64 `json:"liquidityNum"` // current order-book depth
 }
 
 // ParsedOutcomes decodes the outcome names and their implied probabilities, which
