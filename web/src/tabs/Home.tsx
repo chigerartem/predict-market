@@ -63,10 +63,11 @@ export default function Home(_props: Props) {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    // Поиск ищет конкретное событие по всей ленте (игнорируя выбранную категорию);
+    // без поиска — обычный фильтр по категории.
     return (markets ?? []).filter((m) => {
-      if (cat !== "all" && (m.category || "other") !== cat) return false;
-      if (q && !m.title.toLowerCase().includes(q)) return false;
-      return true;
+      if (q) return m.title.toLowerCase().includes(q);
+      return cat === "all" || (m.category || "other") === cat;
     });
   }, [markets, cat, search]);
 
@@ -103,6 +104,8 @@ export default function Home(_props: Props) {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onFocus={() => setViewportColor("#0A0E16")}
+          onBlur={() => setViewportColor("#5CCBFF")}
           placeholder={t("home.search")}
           className="mb-3 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm text-white outline-none placeholder:text-neutral-500"
         />
@@ -184,4 +187,15 @@ function fmtDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+}
+
+// Красит фон viewport Telegram (виден под полупрозрачной клавиатурой и при
+// overscroll). На фокус поиска — тёмный, иначе под клавиатурой проступает голубой
+// фон главной; на blur возвращаем голубой (как красит App для вкладки home).
+function setViewportColor(color: string) {
+  try {
+    window.Telegram?.WebApp?.setBackgroundColor?.(color);
+  } catch {
+    /* старый клиент без setBackgroundColor */
+  }
 }
