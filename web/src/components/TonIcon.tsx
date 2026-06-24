@@ -1,22 +1,8 @@
+import tonUrl from "../assets/ton.svg";
+
 type Props = { size?: number; className?: string };
 
-// Официальный знак TON (The Open Network): синий круг #0098EA с белым кристаллом.
-// Читается и на голубом герое (круг насыщеннее фона), и на тёмных листах модалок.
+// Официальный логотип TON (синий круг + белый кристалл) — SVG-файл из cryptologos.
 export default function TonIcon({ size = 24, className }: Props) {
-  return (
-    <svg
-      viewBox="0 0 56 56"
-      width={size}
-      height={size}
-      className={className}
-      aria-hidden
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <circle cx="28" cy="28" r="28" fill="#0098EA" />
-      <path
-        fill="#fff"
-        d="M37.5603 15.6277H18.4386c-3.5159 0-5.7424 3.7995-3.9739 6.8634l11.7723 20.4138c.7702 1.3335 2.6963 1.3335 3.4665 0l11.7728-20.4138c1.7672-3.0586-.4593-6.8634-3.976-6.8634ZM26.5202 36.0152l-2.5645-4.9628-6.1854-11.0668c-.408-.7071.0973-1.6285.9166-1.6285h7.8333v17.6581Zm9.7062-16.0296-6.1841 11.0668-2.5645 4.9628V18.3571h7.8334c.8193 0 1.3246.9214.9152 1.6285Z"
-      />
-    </svg>
-  );
+  return <img src={tonUrl} width={size} height={size} alt="" aria-hidden className={className} />;
 }
