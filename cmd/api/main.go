@@ -70,7 +70,7 @@ func main() {
 	// Background: mirror real Polymarket markets into our DB on an interval.
 	if envBool("POLY_INGEST_ENABLED", true) {
 		go runIngestLoop(ctx, pool,
-			int(envInt("POLY_INGEST_LIMIT", 200)),
+			int(envInt("POLY_INGEST_LIMIT", 1000)),
 			envFloat("HOUSE_EDGE", 0.05),
 			envFloat("POLY_MAX_PROB", 0.97),
 			envInt("POLY_INGEST_INTERVAL_SEC", 600))

@@ -68,11 +68,33 @@ func (m Market) EndTime() *time.Time {
 	return &t
 }
 
-// FetchMarkets returns up to limit active, open markets ordered by volume.
+// gammaPageSize is the Gamma API's hard per-request cap (it ignores larger limits).
+const gammaPageSize = 100
+
+// FetchMarkets returns up to limit active, open markets ordered by volume,
+// paginating the Gamma API (capped at 100 per request) via offset.
 func FetchMarkets(ctx context.Context, limit int) ([]Market, error) {
+	var all []Market
+	for offset := 0; offset < limit; offset += gammaPageSize {
+		page, err := fetchPage(ctx, gammaPageSize, offset)
+		if err != nil {
+			if len(all) > 0 {
+				break // keep the partial result rather than failing the whole ingest
+			}
+			return nil, err
+		}
+		all = append(all, page...)
+		if len(page) < gammaPageSize {
+			break // reached the end of the list
+		}
+	}
+	return all, nil
+}
+
+func fetchPage(ctx context.Context, limit, offset int) ([]Market, error) {
 	url := fmt.Sprintf(
-		"%s/markets?closed=false&active=true&archived=false&limit=%d&order=volumeNum&ascending=false",
-		gammaBase, limit)
+		"%s/markets?closed=false&active=true&archived=false&limit=%d&offset=%d&order=volumeNum&ascending=false",
+		gammaBase, limit, offset)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
