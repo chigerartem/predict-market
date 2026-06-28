@@ -205,6 +205,8 @@ const en = {
   "basket.insufficient": "Not enough TON",
   "basket.tapToThrow": "Set a stake and shoot",
   "basket.fair": "Provably fair",
+  "basket.auto": "Auto-shoot",
+  "basket.stop": "Stop auto-shoot",
 
   // ── Профиль (Profile) ──────────────────────────────────────────────────
   "profile.maskAria": "Take off or put on the mask",
@@ -402,6 +404,8 @@ const ru: Record<TKey, string> = {
   "basket.insufficient": "Недостаточно TON",
   "basket.tapToThrow": "Поставь и бросай",
   "basket.fair": "Честная игра",
+  "basket.auto": "Авто-броски",
+  "basket.stop": "Остановить",
 
   // ── Профиль (Profile) ──────────────────────────────────────────────────
   "profile.maskAria": "Снять или надеть маску",
