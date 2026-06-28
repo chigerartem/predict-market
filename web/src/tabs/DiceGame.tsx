@@ -179,7 +179,8 @@ export default function DiceGame({ onClose }: { onClose: () => void }) {
       .then((s) => {
         setSt(s);
         setRecent(s.recent ?? []);
-        if (s.recent?.[0]) setDice([s.recent[0].die1, s.recent[0].die2]);
+        // НЕ трогаем кубики при входе: они стоят статично на дефолтной грани и ждут
+        // броска (Артём: при входе ничего не должно загружаться/мелькать/меняться).
       })
       .catch(() => {});
   }, [reloadBalance]);
@@ -354,16 +355,9 @@ export default function DiceGame({ onClose }: { onClose: () => void }) {
                 {[0, 1].map((i) => (
                   <div key={i} className="grid h-32 w-32 place-items-center">
                     {phase === "idle" ? (
-                      // Покой ДО первого броска: кубик стоит на грани (последний кадр),
-                      // без движения.
-                      <Lottie
-                        key={`idle-${dice[i]}-${i}`}
-                        src={`/lottie/dice-${dice[i]}.json`}
-                        className="h-32 w-32"
-                        loop={false}
-                        autoplay={false}
-                        freeze="last"
-                      />
+                      // Покой ДО первого броска: СТАТИЧНАЯ грань (SVG, без lottie) — стоит
+                      // с первого кадра, ничего не грузится, не мелькает, не меняется.
+                      <PipDie n={dice[i]} size={116} className="!rounded-[18px] shadow-lg shadow-black/40" />
                     ) : (
                       // Бросок и покой после него — ОДНА анимация (loop=false: доиграв,
                       // застывает на выпавшей грани). key=rollSeq → новый бросок ремаунтит

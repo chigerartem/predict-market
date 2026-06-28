@@ -27,6 +27,20 @@ const FALLBACK_MS = DUR_MS + 500;
 // «пусто» мелькает редко, иксы преобладают. Порядок = тиры приза (low→high).
 const VIS_WEIGHTS = [14, 28, 26, 18, 9, 5];
 
+// Тиры призов публичны (секрет — только веса), поэтому держим дефолт на клиенте и
+// показываем «что внутри» + наполняем ленту С ПЕРВОГО КАДРА, не дожидаясь /state. Иначе
+// плашка «что внутри» появляется позже, вырастает из нуля и толкает всю сцену вверх.
+// Сервер потом отдаёт те же тиры (та же высота) — скачка нет. Держать в синхроне с
+// internal/casegame/fair.go.
+const DEFAULT_TIERS: CasePrize[] = [
+  { rarity: "grey", mult_milli: 0 },
+  { rarity: "blue", mult_milli: 2000 },
+  { rarity: "purple", mult_milli: 3000 },
+  { rarity: "pink", mult_milli: 7000 },
+  { rarity: "red", mult_milli: 25000 },
+  { rarity: "gold", mult_milli: 200000 },
+];
+
 const TOP = "#1e1b4b"; // верх экрана = цвет плашки Telegram (глубокий индиго)
 const BG_BOTTOM = "#0a0d18";
 
@@ -71,6 +85,21 @@ const multX = (milli: number) => {
   return (Number.isInteger(x) ? String(x) : x.toFixed(1)) + "×";
 };
 const tierLabel = (milli: number) => (milli === 0 ? "—" : multX(milli));
+
+// Случайная карта-наполнитель по визуальным весам (только для вида). Модульная (не
+// useCallback), чтобы строить стартовую ленту прямо в useState-инициализаторе.
+function pickCard(prizes: CasePrize[]): Card {
+  const w = prizes.map((_, i) => VIS_WEIGHTS[i] ?? 1);
+  const total = w.reduce((a, b) => a + b, 0);
+  let x = Math.random() * total;
+  for (let i = 0; i < prizes.length; i++) {
+    x -= w[i];
+    if (x < 0) return { rarity: prizes[i].rarity, multMilli: prizes[i].mult_milli };
+  }
+  const last = prizes[prizes.length - 1];
+  return { rarity: last.rarity, multMilli: last.mult_milli };
+}
+const makeReel = (prizes: CasePrize[]): Card[] => Array.from({ length: REEL_LEN }, () => pickCard(prizes));
 
 // Карточка в ленте: «пусто» — тёмная с прочерком; икс — градиент-тинт + рамка/свечение
 // по редкости, в центре «×N».
@@ -137,7 +166,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
   const [st, setSt] = useState<CaseState | null>(null);
   const [balanceNano, setBalanceNano] = useState(0);
   const [stake, setStake] = useState("0.1");
-  const [reel, setReel] = useState<Card[]>([]);
+  const [reel, setReel] = useState<Card[]>(() => makeReel(DEFAULT_TIERS)); // полная лента с первого кадра
   const [spinSeq, setSpinSeq] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [pending, setPending] = useState(false);
@@ -196,28 +225,17 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
     fetchMe().then((m) => setBalanceNano(m.balance_nano)).catch(() => {});
   }, []);
 
-  const randomCard = useCallback((prizes: CasePrize[]): Card => {
-    const w = prizes.map((_, i) => VIS_WEIGHTS[i] ?? 1);
-    const total = w.reduce((a, b) => a + b, 0);
-    let x = Math.random() * total;
-    for (let i = 0; i < prizes.length; i++) {
-      x -= w[i];
-      if (x < 0) return { rarity: prizes[i].rarity, multMilli: prizes[i].mult_milli };
-    }
-    const last = prizes[prizes.length - 1];
-    return { rarity: last.rarity, multMilli: last.mult_milli };
-  }, []);
-
   useEffect(() => {
     reloadBalance();
     fetchCaseState()
       .then((s) => {
         setSt(s);
         setRecent(s.recent ?? []);
-        setReel(Array.from({ length: REEL_LEN }, () => randomCard(s.prizes)));
+        // Ленту НЕ пересобираем: стартовая (DEFAULT_TIERS) и серверная — одни тиры, одна
+        // высота. Свежую ленту строим только на спин (с выигрышной картой).
       })
       .catch(() => {});
-  }, [reloadBalance, randomCard]);
+  }, [reloadBalance]);
 
   useEffect(() => {
     const bb = (window.Telegram?.WebApp as { BackButton?: { show?: () => void; hide?: () => void; onClick?: (cb: () => void) => void; offClick?: (cb: () => void) => void } } | undefined)?.BackButton;
@@ -309,7 +327,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
     try {
       const res = await caseOpen(nano);
       resultRef.current = res;
-      const next = Array.from({ length: REEL_LEN }, () => randomCard(st.prizes));
+      const next = makeReel(st.prizes);
       next[WIN_INDEX] = { rarity: res.rarity, multMilli: res.mult_milli };
       setReel(next);
       settledRef.current = false;
@@ -408,7 +426,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
             <div className="mb-2.5">
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/40">{t("case.contents")}</div>
               <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {(st?.prizes ?? []).map((p, i) => (
+                {(st?.prizes ?? DEFAULT_TIERS).map((p, i) => (
                   <span key={i} className={"flex shrink-0 items-center rounded-lg px-2 py-1 text-xs font-bold tabular-nums " + RARITY[p.rarity].chip}>
                     {tierLabel(p.mult_milli)}
                   </span>
