@@ -17,22 +17,30 @@ import (
 
 	"predict/internal/betting"
 	"predict/internal/deposits"
+	"predict/internal/dice"
 	"predict/internal/ledger"
 	"predict/internal/markets"
 	"predict/internal/rates"
+	"predict/internal/rocket"
 	"predict/internal/tg"
+	"predict/internal/withdrawals"
 )
 
 // Server holds dependencies for the HTTP API.
 type Server struct {
-	pool          *pgxpool.Pool
-	botToken      string
-	tg            *tg.Client      // nil when no bot token → Stars deposit disabled
-	rates         *rates.Provider // live TON/USD price for valuing Stars deposits
-	webhookSecret string          // shared secret Telegram echoes on webhook calls
-	webOrigin     string
-	devUserID     int64 // when > 0, fallback identity for local dev
-	allowInsecure bool  // when true and no bot token, accept initData WITHOUT verifying (testing only)
+	pool            *pgxpool.Pool
+	botToken        string
+	tg              *tg.Client      // nil when no bot token → Stars deposit disabled
+	rates           *rates.Provider // live TON/USD price for valuing Stars deposits
+	webhookSecret   string          // shared secret Telegram echoes on webhook calls
+	webOrigin       string
+	devUserID       int64              // when > 0, fallback identity for local dev
+	allowInsecure   bool               // when true and no bot token, accept initData WITHOUT verifying (testing only)
+	tonDepositAddr  string             // house TON address users deposit to (TON Connect); "" → TON deposit disabled
+	withdrawSender  withdrawals.Sender // house hot wallet for TON payouts; nil → withdrawals disabled
+	rocket          *rocket.Engine     // crash game engine; nil → rocket endpoints disabled
+	dice            *dice.Store        // dice game; nil → dice endpoints disabled
+	signupBonusNano int64              // one-time test bonus per user on first /api/me; 0 → off
 }
 
 // New builds a Server.
@@ -47,6 +55,24 @@ func New(pool *pgxpool.Pool, botToken, webOrigin string, devUserID int64, allowI
 // SetRates wires the live TON/USD price provider used to value Stars deposits.
 func (s *Server) SetRates(r *rates.Provider) { s.rates = r }
 
+// SetTonDeposit wires the house TON address users send deposits to. Empty disables
+// the TON deposit endpoint (it returns 503).
+func (s *Server) SetTonDeposit(addr string) { s.tonDepositAddr = addr }
+
+// SetWithdrawSender wires the house hot wallet that pays TON withdrawals. nil
+// disables the withdraw endpoint (it returns 503).
+func (s *Server) SetWithdrawSender(sender withdrawals.Sender) { s.withdrawSender = sender }
+
+// SetRocket wires the crash-game engine. nil disables the rocket endpoints (503).
+func (s *Server) SetRocket(e *rocket.Engine) { s.rocket = e }
+
+// SetDice wires the dice-game store. nil disables the dice endpoints (503).
+func (s *Server) SetDice(d *dice.Store) { s.dice = d }
+
+// SetSignupBonus sets the one-time test bonus (nano-TON) each user is credited on
+// first /api/me. 0 disables it. Test-phase only (withdrawals are off).
+func (s *Server) SetSignupBonus(nano int64) { s.signupBonusNano = nano }
+
 // Handler returns the configured HTTP handler (with CORS).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -57,6 +83,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/bets", s.auth(s.handlePlaceBet))
 	mux.HandleFunc("POST /api/deposit/stars/invoice", s.auth(s.handleStarsInvoice))
 	mux.HandleFunc("GET /api/deposit/stars/quote", s.auth(s.handleStarsQuote))
+	mux.HandleFunc("GET /api/deposit/ton/address", s.auth(s.handleTonDepositAddress))
+	mux.HandleFunc("POST /api/withdraw", s.auth(s.handleWithdraw))
+	mux.HandleFunc("GET /api/rocket/state", s.auth(s.handleRocketState))
+	mux.HandleFunc("GET /api/rocket/stream", s.auth(s.handleRocketStream))
+	mux.HandleFunc("POST /api/rocket/bet", s.auth(s.handleRocketBet))
+	mux.HandleFunc("POST /api/rocket/cashout", s.auth(s.handleRocketCashout))
+	mux.HandleFunc("GET /api/dice/state", s.auth(s.handleDiceState))
+	mux.HandleFunc("POST /api/dice/roll", s.auth(s.handleDiceRoll))
+	mux.HandleFunc("POST /api/dice/rotate", s.auth(s.handleDiceRotate))
 	mux.HandleFunc("POST /api/tg/webhook", s.handleTgWebhook)
 	return s.cors(mux)
 }
@@ -75,8 +110,15 @@ func (s *Server) auth(h authedHandler) http.HandlerFunc {
 }
 
 func (s *Server) authenticate(r *http.Request) (int64, error) {
-	authz := r.Header.Get("Authorization")
-	if initData, ok := strings.CutPrefix(authz, "tma "); ok {
+	// initData normally rides the Authorization header; the SSE stream falls back to
+	// an `auth` query param because the browser EventSource can't set headers.
+	initData, ok := strings.CutPrefix(r.Header.Get("Authorization"), "tma ")
+	if !ok {
+		if q := r.URL.Query().Get("auth"); q != "" {
+			initData, ok = q, true
+		}
+	}
+	if ok {
 		var u TgUser
 		var err error
 		switch {
@@ -124,12 +166,26 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, userID int64) 
 		writeErr(w, http.StatusInternalServerError, "server error")
 		return
 	}
+	// Test-phase: credit a one-time bonus so newcomers can try the games. Idempotent
+	// per user, so this only credits the very first time. Non-fatal — a failure here
+	// must not block reading the balance.
+	if s.signupBonusNano > 0 {
+		if err := deposits.GrantSignupBonus(r.Context(), s.pool, userID, s.signupBonusNano); err != nil {
+			log.Printf("signup bonus user %d: %v", userID, err)
+		}
+	}
 	bal, err := ledger.Balance(r.Context(), s.pool, acct)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "server error")
 		return
 	}
-	writeJSON(w, http.StatusOK, meDTO{UserID: userID, BalanceNano: bal})
+	writeJSON(w, http.StatusOK, meDTO{
+		UserID:          userID,
+		BalanceNano:     bal,
+		WithdrawEnabled: s.withdrawSender != nil,
+		MinWithdrawNano: withdrawals.MinWithdrawNano,
+		WithdrawFeeNano: withdrawals.FeeNano,
+	})
 }
 
 func (s *Server) handleMarkets(w http.ResponseWriter, r *http.Request, _ int64) {
@@ -144,7 +200,11 @@ func (s *Server) handleMarkets(w http.ResponseWriter, r *http.Request, _ int64) 
 		for _, o := range m.Outcomes {
 			od = append(od, outcomeDTO{ID: o.ID, Title: o.Title, OddsMilli: o.OddsMilli})
 		}
-		out = append(out, marketDTO{ID: m.ID, Title: m.Title, Category: m.Category, CloseTime: m.CloseTime, Outcomes: od})
+		out = append(out, marketDTO{
+			ID: m.ID, Title: m.Title, Category: m.Category, CloseTime: m.CloseTime,
+			GameStart: m.GameStart, ImageURL: m.ImageURL,
+			Description: m.Description, ContextDescription: m.ContextDescription, Outcomes: od,
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -243,6 +303,296 @@ func (s *Server) handleStarsQuote(w http.ResponseWriter, r *http.Request, _ int6
 	writeJSON(w, http.StatusOK, starsQuoteDTO{Stars: stars, TonNano: nano})
 }
 
+// handleTonDepositAddress returns the house TON deposit address and the caller's
+// unique memo. The Mini App builds a TON Connect transfer to {address} carrying
+// {memo} as the transfer comment; the chain watcher then credits the confirmed
+// inbound amount 1:1 to this user. We credit what actually arrives on-chain, not
+// any requested amount, so a user editing the amount in their wallet is harmless.
+func (s *Server) handleTonDepositAddress(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.tonDepositAddr == "" {
+		writeErr(w, http.StatusServiceUnavailable, "ton deposit unavailable")
+		return
+	}
+	memo, err := deposits.EnsureTonMemo(r.Context(), s.pool, userID)
+	if err != nil {
+		log.Printf("ton deposit memo for user %d: %v", userID, err)
+		writeErr(w, http.StatusInternalServerError, "could not prepare deposit")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"address":  s.tonDepositAddr,
+		"memo":     memo,
+		"min_nano": deposits.MinTonDepositNano,
+	})
+}
+
+// handleWithdraw books a TON payout: it debits the user's balance and queues a
+// pending withdrawal the background sender broadcasts on-chain. The user receives
+// amount_nano minus the network fee. Returns the queued withdrawal so the Mini App
+// can confirm it's in flight.
+func (s *Server) handleWithdraw(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.withdrawSender == nil {
+		writeErr(w, http.StatusServiceUnavailable, "withdrawals unavailable")
+		return
+	}
+	var req struct {
+		ToAddress  string `json:"to_address"`
+		AmountNano int64  `json:"amount_nano"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	wd, err := withdrawals.Request(r.Context(), s.pool, userID, req.ToAddress, req.AmountNano)
+	if err != nil {
+		switch {
+		case errors.Is(err, withdrawals.ErrBadAddress):
+			writeErr(w, http.StatusBadRequest, "invalid address")
+		case errors.Is(err, withdrawals.ErrAmountTooSmall):
+			writeErr(w, http.StatusBadRequest, "amount too small")
+		case errors.Is(err, withdrawals.ErrInsufficient):
+			writeErr(w, http.StatusBadRequest, "insufficient balance")
+		default:
+			log.Printf("withdraw user %d: %v", userID, err)
+			writeErr(w, http.StatusInternalServerError, "server error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":          wd.ID,
+		"status":      wd.Status,
+		"amount_nano": wd.AmountNano,
+		"fee_nano":    wd.FeeNano,
+		"send_nano":   wd.SendNano,
+	})
+}
+
+// handleRocketState returns the current crash-game state (one-shot, for initial
+// load or polling fallback).
+func (s *Server) handleRocketState(w http.ResponseWriter, _ *http.Request, _ int64) {
+	if s.rocket == nil {
+		writeErr(w, http.StatusServiceUnavailable, "rocket unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(s.rocket.SnapshotJSON())
+}
+
+// handleRocketStream pushes live round state over Server-Sent Events. Auth comes
+// from the `auth` query param (the browser EventSource can't set headers). The
+// per-connection write deadline is cleared so the long-lived stream isn't killed by
+// the server's default WriteTimeout.
+func (s *Server) handleRocketStream(w http.ResponseWriter, r *http.Request, _ int64) {
+	if s.rocket == nil {
+		writeErr(w, http.StatusServiceUnavailable, "rocket unavailable")
+		return
+	}
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{}) // no write timeout for this connection
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering, if any
+	w.WriteHeader(http.StatusOK)
+
+	ch, cancel := s.rocket.Subscribe()
+	defer cancel()
+
+	// Send the current snapshot immediately so a fresh client renders without waiting.
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", s.rocket.SnapshotJSON()); err != nil {
+		return
+	}
+	_ = rc.Flush()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", msg); err != nil {
+				return
+			}
+			if err := rc.Flush(); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// handleRocketBet places a stake in the current round's betting window.
+func (s *Server) handleRocketBet(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.rocket == nil {
+		writeErr(w, http.StatusServiceUnavailable, "rocket unavailable")
+		return
+	}
+	var req struct {
+		StakeNano int64 `json:"stake_nano"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	roundID, betID, err := s.rocket.PlaceBet(r.Context(), userID, req.StakeNano)
+	if err != nil {
+		switch {
+		case errors.Is(err, rocket.ErrStakeTooSmall):
+			writeErr(w, http.StatusBadRequest, "stake too small")
+		case errors.Is(err, rocket.ErrStakeTooLarge):
+			writeErr(w, http.StatusBadRequest, "stake too large")
+		case errors.Is(err, rocket.ErrBettingClosed):
+			writeErr(w, http.StatusBadRequest, "betting is closed")
+		case errors.Is(err, rocket.ErrAlreadyInRound):
+			writeErr(w, http.StatusBadRequest, "already in this round")
+		case errors.Is(err, rocket.ErrInsufficient):
+			writeErr(w, http.StatusBadRequest, "insufficient balance")
+		default:
+			log.Printf("rocket bet user %d: %v", userID, err)
+			writeErr(w, http.StatusInternalServerError, "server error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"round_id": roundID, "bet_id": betID})
+}
+
+// handleRocketCashout cashes the caller out of the current flight at the live
+// multiplier.
+func (s *Server) handleRocketCashout(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.rocket == nil {
+		writeErr(w, http.StatusServiceUnavailable, "rocket unavailable")
+		return
+	}
+	multMilli, payoutNano, err := s.rocket.Cashout(r.Context(), userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, rocket.ErrNotFlying):
+			writeErr(w, http.StatusBadRequest, "round not in flight")
+		case errors.Is(err, rocket.ErrTooLate):
+			writeErr(w, http.StatusBadRequest, "too late")
+		case errors.Is(err, rocket.ErrNoActiveBet):
+			writeErr(w, http.StatusBadRequest, "no active bet")
+		default:
+			log.Printf("rocket cashout user %d: %v", userID, err)
+			writeErr(w, http.StatusInternalServerError, "server error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"multiplier_milli": multMilli,
+		"payout_nano":      payoutNano,
+	})
+}
+
+// handleDiceState returns the player's fairness commitment (seed hash, client seed,
+// nonce), the economics (edge, stake bounds), the multiplier table, and recent rolls.
+func (s *Server) handleDiceState(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.dice == nil {
+		writeErr(w, http.StatusServiceUnavailable, "dice unavailable")
+		return
+	}
+	st, err := s.dice.State(r.Context(), userID)
+	if err != nil {
+		log.Printf("dice state user %d: %v", userID, err)
+		writeErr(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	cfg := s.dice.Config()
+	exact := make(map[string]int64, 11)
+	for t := 2; t <= 12; t++ {
+		exact[strconv.Itoa(t)] = dice.MultMilli(cfg.EdgeBp, dice.Ways(dice.BetExact, t))
+	}
+	writeJSON(w, http.StatusOK, diceStateDTO{
+		ServerSeedHash: st.ServerSeedHash,
+		ClientSeed:     st.ClientSeed,
+		Nonce:          st.Nonce,
+		EdgeBp:         cfg.EdgeBp,
+		MinStakeNano:   cfg.MinStakeNano,
+		MaxStakeNano:   cfg.MaxStakeNano,
+		MultLow:        dice.MultMilli(cfg.EdgeBp, dice.Ways(dice.BetLow, 0)),
+		MultHigh:       dice.MultMilli(cfg.EdgeBp, dice.Ways(dice.BetHigh, 0)),
+		MultExact:      exact,
+		Recent:         st.Recent,
+	})
+}
+
+// handleDiceRoll plays one instant roll on the player's chosen bet.
+func (s *Server) handleDiceRoll(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.dice == nil {
+		writeErr(w, http.StatusServiceUnavailable, "dice unavailable")
+		return
+	}
+	var req struct {
+		BetKind   string `json:"bet_kind"`
+		BetTarget int    `json:"bet_target"`
+		StakeNano int64  `json:"stake_nano"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	res, err := s.dice.Roll(r.Context(), userID, req.BetKind, req.BetTarget, req.StakeNano)
+	if err != nil {
+		switch {
+		case errors.Is(err, dice.ErrInvalidBet):
+			writeErr(w, http.StatusBadRequest, "invalid bet")
+		case errors.Is(err, dice.ErrStakeTooSmall):
+			writeErr(w, http.StatusBadRequest, "stake too small")
+		case errors.Is(err, dice.ErrStakeTooLarge):
+			writeErr(w, http.StatusBadRequest, "stake too large")
+		case errors.Is(err, dice.ErrInsufficient):
+			writeErr(w, http.StatusBadRequest, "insufficient balance")
+		case errors.Is(err, dice.ErrHouseCantCover):
+			writeErr(w, http.StatusBadRequest, "stake too large for bankroll")
+		default:
+			log.Printf("dice roll user %d: %v", userID, err)
+			writeErr(w, http.StatusInternalServerError, "server error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, diceRollDTO{
+		RollID:         res.RollID,
+		Nonce:          res.Nonce,
+		Die1:           res.Die1,
+		Die2:           res.Die2,
+		Sum:            res.Sum,
+		Won:            res.Won,
+		MultMilli:      res.MultMilli,
+		PayoutNano:     res.PayoutNano,
+		BalanceNano:    res.BalanceNano,
+		ServerSeedHash: res.ServerSeedHash,
+	})
+}
+
+// handleDiceRotate reveals the player's current server seed and commits a fresh one
+// (resetting the nonce), so they can verify all rolls drawn under the old seed.
+func (s *Server) handleDiceRotate(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.dice == nil {
+		writeErr(w, http.StatusServiceUnavailable, "dice unavailable")
+		return
+	}
+	var req struct {
+		ClientSeed string `json:"client_seed"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req) // body optional
+	rot, err := s.dice.RotateSeed(r.Context(), userID, req.ClientSeed)
+	if err != nil {
+		log.Printf("dice rotate user %d: %v", userID, err)
+		writeErr(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"old_server_seed":  rot.OldServerSeed,
+		"old_server_hash":  rot.OldServerHash,
+		"rolled_nonce":     rot.RolledNonce,
+		"server_seed_hash": rot.NewServerHash,
+		"client_seed":      rot.NewClientSeed,
+	})
+}
+
 // RegisterWebhook stores the secret used to authenticate incoming webhook calls
 // and (if url is non-empty) registers it with Telegram. No-op without a bot token.
 func (s *Server) RegisterWebhook(ctx context.Context, url, secret string) error {
@@ -334,13 +684,42 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 }
 
 type meDTO struct {
-	UserID      int64 `json:"user_id"`
-	BalanceNano int64 `json:"balance_nano"`
+	UserID          int64 `json:"user_id"`
+	BalanceNano     int64 `json:"balance_nano"`
+	WithdrawEnabled bool  `json:"withdraw_enabled"`
+	MinWithdrawNano int64 `json:"min_withdraw_nano"`
+	WithdrawFeeNano int64 `json:"withdraw_fee_nano"`
 }
 
 type starsQuoteDTO struct {
 	Stars   int64 `json:"stars"`
 	TonNano int64 `json:"ton_nano"`
+}
+
+type diceStateDTO struct {
+	ServerSeedHash string           `json:"server_seed_hash"`
+	ClientSeed     string           `json:"client_seed"`
+	Nonce          int64            `json:"nonce"`
+	EdgeBp         int64            `json:"edge_bp"`
+	MinStakeNano   int64            `json:"min_stake_nano"`
+	MaxStakeNano   int64            `json:"max_stake_nano"`
+	MultLow        int64            `json:"mult_low"`
+	MultHigh       int64            `json:"mult_high"`
+	MultExact      map[string]int64 `json:"mult_exact"` // keys "2".."12"
+	Recent         []dice.RollRow   `json:"recent"`
+}
+
+type diceRollDTO struct {
+	RollID         int64  `json:"roll_id"`
+	Nonce          int64  `json:"nonce"`
+	Die1           int    `json:"die1"`
+	Die2           int    `json:"die2"`
+	Sum            int    `json:"sum"`
+	Won            bool   `json:"won"`
+	MultMilli      int64  `json:"mult_milli"`
+	PayoutNano     int64  `json:"payout_nano"`
+	BalanceNano    int64  `json:"balance_nano"`
+	ServerSeedHash string `json:"server_seed_hash"`
 }
 
 type outcomeDTO struct {
@@ -350,37 +729,51 @@ type outcomeDTO struct {
 }
 
 type marketDTO struct {
-	ID        int64        `json:"id"`
-	Title     string       `json:"title"`
-	Category  string       `json:"category"`
-	CloseTime *time.Time   `json:"close_time"`
-	Outcomes  []outcomeDTO `json:"outcomes"`
+	ID                 int64        `json:"id"`
+	Title              string       `json:"title"`
+	Category           string       `json:"category"`
+	CloseTime          *time.Time   `json:"close_time"`
+	GameStart          *time.Time   `json:"game_start_time,omitempty"`
+	ImageURL           string       `json:"image_url,omitempty"`
+	Description        string       `json:"description,omitempty"`
+	ContextDescription string       `json:"context_description,omitempty"`
+	Outcomes           []outcomeDTO `json:"outcomes"`
 }
 
 type betDTO struct {
-	ID           int64     `json:"id"`
-	MarketID     int64     `json:"market_id"`
-	OutcomeID    int64     `json:"outcome_id"`
-	StakeNano    int64     `json:"stake_nano"`
-	OddsMilli    int64     `json:"odds_milli"`
-	PayoutNano   int64     `json:"payout_nano"`
-	Status       string    `json:"status"`
-	PlacedAt     time.Time `json:"placed_at"`
-	MarketTitle  string    `json:"market_title"`
-	OutcomeTitle string    `json:"outcome_title"`
+	ID                 int64      `json:"id"`
+	MarketID           int64      `json:"market_id"`
+	OutcomeID          int64      `json:"outcome_id"`
+	StakeNano          int64      `json:"stake_nano"`
+	OddsMilli          int64      `json:"odds_milli"`
+	PayoutNano         int64      `json:"payout_nano"`
+	Status             string     `json:"status"`
+	PlacedAt           time.Time  `json:"placed_at"`
+	MarketTitle        string     `json:"market_title"`
+	OutcomeTitle       string     `json:"outcome_title"`
+	ImageURL           string     `json:"image_url,omitempty"`
+	Description        string     `json:"description,omitempty"`
+	ContextDescription string     `json:"context_description,omitempty"`
+	CloseTime          *time.Time `json:"close_time,omitempty"`
+	GameStart          *time.Time `json:"game_start_time,omitempty"`
 }
 
 func toBetDTO(b betting.Bet) betDTO {
 	return betDTO{
-		ID:           b.ID,
-		MarketID:     b.MarketID,
-		OutcomeID:    b.OutcomeID,
-		StakeNano:    b.StakeNano,
-		OddsMilli:    b.OddsMilli,
-		PayoutNano:   b.PayoutNano,
-		Status:       b.Status,
-		PlacedAt:     b.PlacedAt,
-		MarketTitle:  b.MarketTitle,
-		OutcomeTitle: b.OutcomeTitle,
+		ID:                 b.ID,
+		MarketID:           b.MarketID,
+		OutcomeID:          b.OutcomeID,
+		StakeNano:          b.StakeNano,
+		OddsMilli:          b.OddsMilli,
+		PayoutNano:         b.PayoutNano,
+		Status:             b.Status,
+		PlacedAt:           b.PlacedAt,
+		MarketTitle:        b.MarketTitle,
+		OutcomeTitle:       b.OutcomeTitle,
+		ImageURL:           b.ImageURL,
+		Description:        b.Description,
+		ContextDescription: b.ContextDescription,
+		CloseTime:          b.CloseTime,
+		GameStart:          b.GameStart,
 	}
 }

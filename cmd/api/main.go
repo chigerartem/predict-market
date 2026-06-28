@@ -15,9 +15,13 @@ import (
 
 	"predict/internal/db"
 	"predict/internal/deposits"
+	"predict/internal/dice"
 	"predict/internal/httpapi"
 	"predict/internal/polymarket"
 	"predict/internal/rates"
+	"predict/internal/rocket"
+	"predict/internal/ton"
+	"predict/internal/withdrawals"
 )
 
 func main() {
@@ -63,6 +67,15 @@ func main() {
 		deposits.DepositBuffer = v
 	}
 
+	// House TON address users deposit to (TON Connect). Empty → TON deposit
+	// endpoint disabled. The watcher that credits inbound transfers is wired below.
+	srv.SetTonDeposit(os.Getenv("TON_DEPOSIT_ADDRESS"))
+
+	// Test-phase: one-time bonus (nano-TON) credited to each user on first /api/me so
+	// people can try the games without depositing. 0 (default) disables it. Set e.g.
+	// SIGNUP_BONUS_NANO=100000000000 for 100 TON. Idempotent per user.
+	srv.SetSignupBonus(envInt("SIGNUP_BONUS_NANO", 0))
+
 	if err := srv.RegisterWebhook(ctx, os.Getenv("TG_WEBHOOK_URL"), os.Getenv("TG_WEBHOOK_SECRET")); err != nil {
 		log.Printf("webhook registration failed (continuing): %v", err)
 	}
@@ -80,6 +93,74 @@ func main() {
 	// Background: settle our markets that resolved on Polymarket (pays/charges bets).
 	if envBool("POLY_RESOLVE_ENABLED", true) {
 		go runResolveLoop(ctx, pool, envInt("POLY_RESOLVE_INTERVAL_SEC", 300))
+	}
+
+	// Background: watch the house TON address and credit inbound deposits by memo.
+	if addr := os.Getenv("TON_DEPOSIT_ADDRESS"); addr != "" && envBool("TON_DEPOSIT_ENABLED", true) {
+		go runTonWatchLoop(ctx, ton.NewWatcher(pool, addr, os.Getenv("TONCENTER_API_KEY")),
+			envInt("TON_WATCH_INTERVAL_SEC", 20))
+	}
+
+	// House hot wallet for TON withdrawals (auto-payout). Empty mnemonic disables
+	// the feature. Wallet init does a network call, so a failure here only disables
+	// withdrawals — the API still starts.
+	if mnemonic := os.Getenv("TON_HOT_WALLET_MNEMONIC"); mnemonic != "" && envBool("TON_WITHDRAW_ENABLED", true) {
+		sender, err := ton.NewSender(ctx, mnemonic)
+		if err != nil {
+			log.Printf("ton withdraw disabled: hot wallet init failed: %v", err)
+		} else {
+			log.Printf("ton withdraw enabled: hot wallet %s", sender.Address())
+			srv.SetWithdrawSender(sender)
+			go runWithdrawLoop(ctx, pool, sender, envInt("TON_WITHDRAW_INTERVAL_SEC", 15))
+		}
+	}
+
+	// Rocket crash game: one shared round loop in the background, live state over
+	// SSE. Reuses the ledger; needs a funded HOUSE_TREASURY to cover cashout profits.
+	if envBool("ROCKET_ENABLED", true) {
+		store, err := rocket.NewStore(ctx, pool)
+		if err != nil {
+			log.Printf("rocket disabled: %v", err)
+		} else {
+			cfg := rocket.DefaultConfig()
+			if v := envInt("ROCKET_EDGE_BP", 0); v > 0 {
+				cfg.EdgeBp = v
+			}
+			if v := envFloat("ROCKET_GROWTH", 0); v > 0 {
+				cfg.GrowthPerSec = v
+			}
+			if v := envInt("ROCKET_MAX_MILLI", 0); v > 0 {
+				cfg.MaxMilli = v
+			}
+			if v := envInt("ROCKET_MAX_STAKE_NANO", 0); v > 0 {
+				cfg.MaxStakeNano = v
+			}
+			eng := rocket.New(store, cfg)
+			eng.Warm(ctx)
+			srv.SetRocket(eng)
+			go eng.Run(ctx)
+			log.Printf("rocket enabled (edge %dbp, cap %dx)", cfg.EdgeBp, cfg.MaxMilli/1000)
+		}
+	}
+
+	// Dice: instant single-player game. Reuses the ledger; needs a funded
+	// HOUSE_TREASURY to cover wins (same as rocket — the non-negative CHECK rejects
+	// a payout it can't cover).
+	if envBool("DICE_ENABLED", true) {
+		cfg := dice.DefaultConfig()
+		if v := envInt("DICE_EDGE_BP", 0); v > 0 {
+			cfg.EdgeBp = v
+		}
+		if v := envInt("DICE_MAX_STAKE_NANO", 0); v > 0 {
+			cfg.MaxStakeNano = v
+		}
+		store, err := dice.NewStore(ctx, pool, cfg)
+		if err != nil {
+			log.Printf("dice disabled: %v", err)
+		} else {
+			srv.SetDice(store)
+			log.Printf("dice enabled (edge %dbp)", cfg.EdgeBp)
+		}
 	}
 
 	httpSrv := &http.Server{
@@ -125,6 +206,54 @@ func runIngestLoop(ctx context.Context, pool *pgxpool.Pool, limit int, edge, max
 			return
 		}
 		log.Printf("polymarket ingest: %d markets", n)
+	}
+	tick() // once at startup
+	t := time.NewTicker(time.Duration(intervalSec) * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			tick()
+		}
+	}
+}
+
+func runTonWatchLoop(ctx context.Context, wc *ton.Watcher, intervalSec int64) {
+	tick := func() {
+		n, err := wc.Poll(ctx)
+		if err != nil {
+			log.Printf("ton watcher: %v", err)
+			return
+		}
+		if n > 0 {
+			log.Printf("ton watcher: credited %d deposit(s)", n)
+		}
+	}
+	tick() // once at startup
+	t := time.NewTicker(time.Duration(intervalSec) * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			tick()
+		}
+	}
+}
+
+func runWithdrawLoop(ctx context.Context, pool *pgxpool.Pool, sender withdrawals.Sender, intervalSec int64) {
+	tick := func() {
+		n, err := withdrawals.ProcessPending(ctx, pool, sender, 20)
+		if err != nil {
+			log.Printf("withdrawals: %v", err)
+			return
+		}
+		if n > 0 {
+			log.Printf("withdrawals: sent %d payout(s)", n)
+		}
 	}
 	tick() // once at startup
 	t := time.NewTicker(time.Duration(intervalSec) * time.Second)
