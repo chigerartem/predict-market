@@ -21,6 +21,10 @@ dist/
 *.local
 *.tsbuildinfo
 
+# --- Python ---
+__pycache__/
+*.pyc
+
 # --- Logs / tmp ---
 *.log
 tmp/
