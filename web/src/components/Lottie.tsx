@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import lottie from "lottie-web";
 
 // Тонкая обёртка над lottie-web: грузит JSON-анимацию из /public/lottie и крутит её.
@@ -29,9 +29,14 @@ export default function Lottie({
   const ref = useRef<HTMLDivElement>(null);
   const cbRef = useRef(onComplete);
   cbRef.current = onComplete; // всегда свежий колбэк без перезапуска эффекта
+  // freeze="last": прячем контейнер, пока не встанем на последний кадр. Иначе до события
+  // DOMLoaded lottie показывает кадр 0 (для кубиков — «кубик в полёте»), и при каждой
+  // смене src (грани) это мелькает как лишняя прокрутка. Скрыт → виден ровно гранью.
+  const [revealed, setRevealed] = useState(freeze !== "last");
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    if (freeze === "last") setRevealed(false); // src сменился → снова прячем до постановки кадра
     const anim = lottie.loadAnimation({
       container: el,
       renderer: "svg",
@@ -44,7 +49,10 @@ export default function Lottie({
     anim.addEventListener("complete", handleComplete);
     let handleLoaded: (() => void) | undefined;
     if (freeze === "last") {
-      handleLoaded = () => anim.goToAndStop(Math.max(0, Math.round(anim.totalFrames) - 1), true);
+      handleLoaded = () => {
+        anim.goToAndStop(Math.max(0, Math.round(anim.totalFrames) - 1), true);
+        setRevealed(true);
+      };
       anim.addEventListener("DOMLoaded", handleLoaded);
     }
     return () => {
@@ -53,5 +61,5 @@ export default function Lottie({
       anim.destroy();
     };
   }, [src, loop, autoplay, freeze, speed]);
-  return <div ref={ref} className={className} aria-hidden />;
+  return <div ref={ref} className={className} aria-hidden style={revealed ? undefined : { opacity: 0 }} />;
 }

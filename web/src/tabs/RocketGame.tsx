@@ -167,17 +167,26 @@ export default function RocketGame({ onClose }: { onClose: () => void }) {
     const vv = window.visualViewport;
     const el = clipRef.current;
     if (!vv || !el) return;
-    let raf = 0, lastH = -1, lastT = -1;
+    let raf = 0, lastKey = "";
+    // В фокусе (клавиатура) — высота по visualViewport (+ сдвиг). В расфокусе — СТАБИЛЬНАЯ
+    // --app-h (та же, что у корня), а НЕ window.innerHeight: innerHeight на пару px
+    // отличается от --app-h, и центрированная сцена «доводилась» при входе. --app-h после
+    // старта не меняется → вход без подпрыгивания.
     const sync = () => {
       const ae = document.activeElement as HTMLElement | null;
       const focused = !!ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA");
-      const h = focused ? Math.round(vv.height) : Math.round(window.innerHeight);
-      const tY = focused ? Math.round(vv.offsetTop) : 0;
-      if (h !== lastH || tY !== lastT) {
-        el.style.height = h + "px";
-        el.style.transform = tY ? `translateY(${tY}px)` : "";
-        lastH = h;
-        lastT = tY;
+      if (focused) {
+        const h = Math.round(vv.height), tY = Math.round(vv.offsetTop);
+        const key = `f${h}_${tY}`;
+        if (key !== lastKey) {
+          el.style.height = h + "px";
+          el.style.transform = tY ? `translateY(${tY}px)` : "";
+          lastKey = key;
+        }
+      } else if (lastKey !== "s") {
+        el.style.height = "var(--app-h, 100dvh)";
+        el.style.transform = "";
+        lastKey = "s";
       }
     };
     sync(); // синхронно до первого paint
