@@ -275,7 +275,7 @@ export type CasePrize = {
 export type CaseSpinRow = {
   id: number;
   nonce: number;
-  price_nano: number;
+  stake_nano: number;
   prize_index: number;
   rarity: CasePrize["rarity"];
   mult_milli: number;
@@ -287,7 +287,8 @@ export type CaseState = {
   server_seed_hash: string;
   client_seed: string;
   nonce: number;
-  price_nano: number;
+  min_stake_nano: number;
+  max_stake_nano: number; // 0 = uncapped
   prizes: CasePrize[]; // reel tiers, low → high; weights stay server-side
   recent: CaseSpinRow[];
 };
@@ -298,26 +299,27 @@ export type CaseSpinResult = {
   prize_index: number;
   rarity: CasePrize["rarity"];
   mult_milli: number;
-  price_nano: number;
+  stake_nano: number;
   payout_nano: number;
   balance_nano: number;
   server_seed_hash: string;
 };
 
-// fetchCaseState returns the fairness commitment, the spin price, the prize table and
-// recent spins. Creates the seed on first call.
+// fetchCaseState returns the fairness commitment, stake bounds, the prize table (rarity +
+// multiplier) and recent spins. Creates the seed on first call.
 export async function fetchCaseState(): Promise<CaseState> {
   const r = await fetch(`${API_BASE}/api/case/state`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`case state ${r.status}`);
   return (await r.json()) as CaseState;
 }
 
-// caseOpen plays one instant spin at the fixed case price. Returns the drawn prize and
-// the new balance. Throws with the server message (e.g. insufficient balance).
-export async function caseOpen(): Promise<CaseSpinResult> {
+// caseOpen plays one instant spin at the chosen stake. Returns the drawn prize (stake ×
+// multiplier) and the new balance. Throws with the server message.
+export async function caseOpen(stakeNano: number): Promise<CaseSpinResult> {
   const r = await fetch(`${API_BASE}/api/case/open`, {
     method: "POST",
     headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ stake_nano: stakeNano }),
   });
   if (!r.ok) {
     const e = (await r.json().catch(() => ({}))) as { error?: string };
