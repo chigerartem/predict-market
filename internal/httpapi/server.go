@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"predict/internal/basket"
 	"predict/internal/betting"
 	"predict/internal/casegame"
 	"predict/internal/deposits"
@@ -42,6 +43,7 @@ type Server struct {
 	rocket          *rocket.Engine     // crash game engine; nil → rocket endpoints disabled
 	dice            *dice.Store        // dice game; nil → dice endpoints disabled
 	caseStore       *casegame.Store    // case-opening game; nil → case endpoints disabled
+	basket          *basket.Store      // basketball game; nil → basket endpoints disabled
 	signupBonusNano int64              // one-time test bonus per user on first /api/me; 0 → off
 }
 
@@ -74,6 +76,9 @@ func (s *Server) SetDice(d *dice.Store) { s.dice = d }
 // SetCase wires the case-opening game store. nil disables the case endpoints (503).
 func (s *Server) SetCase(c *casegame.Store) { s.caseStore = c }
 
+// SetBasket wires the basketball game store. nil disables the basket endpoints (503).
+func (s *Server) SetBasket(b *basket.Store) { s.basket = b }
+
 // SetSignupBonus sets the one-time test bonus (nano-TON) each user is credited on
 // first /api/me. 0 disables it. Test-phase only (withdrawals are off).
 func (s *Server) SetSignupBonus(nano int64) { s.signupBonusNano = nano }
@@ -100,6 +105,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/case/state", s.auth(s.handleCaseState))
 	mux.HandleFunc("POST /api/case/open", s.auth(s.handleCaseOpen))
 	mux.HandleFunc("POST /api/case/rotate", s.auth(s.handleCaseRotate))
+	mux.HandleFunc("GET /api/basket/state", s.auth(s.handleBasketState))
+	mux.HandleFunc("POST /api/basket/throw", s.auth(s.handleBasketThrow))
+	mux.HandleFunc("POST /api/basket/rotate", s.auth(s.handleBasketRotate))
 	mux.HandleFunc("POST /api/tg/webhook", s.handleTgWebhook)
 	return s.cors(mux)
 }
@@ -696,6 +704,100 @@ func (s *Server) handleCaseRotate(w http.ResponseWriter, r *http.Request, userID
 	})
 }
 
+// handleBasketState returns the player's fairness commitment, the economics (chance,
+// edge, multiplier), stake bounds and recent throws.
+func (s *Server) handleBasketState(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.basket == nil {
+		writeErr(w, http.StatusServiceUnavailable, "basket unavailable")
+		return
+	}
+	st, err := s.basket.State(r.Context(), userID)
+	if err != nil {
+		log.Printf("basket state user %d: %v", userID, err)
+		writeErr(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, basketStateDTO{
+		ServerSeedHash: st.ServerSeedHash,
+		ClientSeed:     st.ClientSeed,
+		Nonce:          st.Nonce,
+		HitProbBp:      st.HitProbBp,
+		EdgeBp:         st.EdgeBp,
+		MultMilli:      st.MultMilli,
+		MinStakeNano:   st.MinStakeNano,
+		MaxStakeNano:   st.MaxStakeNano,
+		Recent:         st.Recent,
+	})
+}
+
+// handleBasketThrow plays one instant shot at the player's chosen stake.
+func (s *Server) handleBasketThrow(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.basket == nil {
+		writeErr(w, http.StatusServiceUnavailable, "basket unavailable")
+		return
+	}
+	var req struct {
+		StakeNano int64 `json:"stake_nano"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	res, err := s.basket.Throw(r.Context(), userID, req.StakeNano)
+	if err != nil {
+		switch {
+		case errors.Is(err, basket.ErrStakeTooSmall):
+			writeErr(w, http.StatusBadRequest, "stake too small")
+		case errors.Is(err, basket.ErrStakeTooLarge):
+			writeErr(w, http.StatusBadRequest, "stake too large")
+		case errors.Is(err, basket.ErrInsufficient):
+			writeErr(w, http.StatusBadRequest, "insufficient balance")
+		case errors.Is(err, basket.ErrHouseCantCover):
+			writeErr(w, http.StatusBadRequest, "stake too large for bankroll")
+		default:
+			log.Printf("basket throw user %d: %v", userID, err)
+			writeErr(w, http.StatusInternalServerError, "server error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, basketThrowDTO{
+		ThrowID:        res.ThrowID,
+		Nonce:          res.Nonce,
+		Roll:           res.Roll,
+		Hit:            res.Hit,
+		MultMilli:      res.MultMilli,
+		StakeNano:      res.StakeNano,
+		PayoutNano:     res.PayoutNano,
+		BalanceNano:    res.BalanceNano,
+		ServerSeedHash: res.ServerSeedHash,
+	})
+}
+
+// handleBasketRotate reveals the player's current server seed and commits a fresh one.
+func (s *Server) handleBasketRotate(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.basket == nil {
+		writeErr(w, http.StatusServiceUnavailable, "basket unavailable")
+		return
+	}
+	var req struct {
+		ClientSeed string `json:"client_seed"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req) // body optional
+	rot, err := s.basket.RotateSeed(r.Context(), userID, req.ClientSeed)
+	if err != nil {
+		log.Printf("basket rotate user %d: %v", userID, err)
+		writeErr(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"old_server_seed":  rot.OldServerSeed,
+		"old_server_hash":  rot.OldServerHash,
+		"thrown_nonce":     rot.ThrownNonce,
+		"server_seed_hash": rot.NewServerHash,
+		"client_seed":      rot.NewClientSeed,
+	})
+}
+
 // RegisterWebhook stores the secret used to authenticate incoming webhook calls
 // and (if url is non-empty) registers it with Telegram. No-op without a bot token.
 func (s *Server) RegisterWebhook(ctx context.Context, url, secret string) error {
@@ -840,6 +942,30 @@ type caseSpinDTO struct {
 	Nonce          int64  `json:"nonce"`
 	PrizeIndex     int    `json:"prize_index"`
 	Rarity         string `json:"rarity"`
+	MultMilli      int64  `json:"mult_milli"`
+	StakeNano      int64  `json:"stake_nano"`
+	PayoutNano     int64  `json:"payout_nano"`
+	BalanceNano    int64  `json:"balance_nano"`
+	ServerSeedHash string `json:"server_seed_hash"`
+}
+
+type basketStateDTO struct {
+	ServerSeedHash string            `json:"server_seed_hash"`
+	ClientSeed     string            `json:"client_seed"`
+	Nonce          int64             `json:"nonce"`
+	HitProbBp      int64             `json:"hit_prob_bp"` // score chance, 5000 = 50%
+	EdgeBp         int64             `json:"edge_bp"`
+	MultMilli      int64             `json:"mult_milli"` // win multiplier ×1000
+	MinStakeNano   int64             `json:"min_stake_nano"`
+	MaxStakeNano   int64             `json:"max_stake_nano"`
+	Recent         []basket.ThrowRow `json:"recent"`
+}
+
+type basketThrowDTO struct {
+	ThrowID        int64  `json:"throw_id"`
+	Nonce          int64  `json:"nonce"`
+	Roll           int    `json:"roll"`
+	Hit            bool   `json:"hit"`
 	MultMilli      int64  `json:"mult_milli"`
 	StakeNano      int64  `json:"stake_nano"`
 	PayoutNano     int64  `json:"payout_nano"`

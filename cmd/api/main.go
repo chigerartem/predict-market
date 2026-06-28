@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"predict/internal/basket"
 	"predict/internal/casegame"
 	"predict/internal/db"
 	"predict/internal/deposits"
@@ -178,6 +179,25 @@ func main() {
 		} else {
 			srv.SetCase(store)
 			log.Printf("case enabled (min stake %d nano)", cfg.MinStakeNano)
+		}
+	}
+
+	// Basketball: instant single-player shot game. Reuses the ledger; wins are covered by
+	// HOUSE_TREASURY (allowed to go negative, migration 0014).
+	if envBool("BASKET_ENABLED", true) {
+		cfg := basket.DefaultConfig()
+		if v := envInt("BASKET_HIT_PROB_BP", 0); v > 0 {
+			cfg.HitProbBp = v
+		}
+		if v := envInt("BASKET_EDGE_BP", 0); v > 0 {
+			cfg.EdgeBp = v
+		}
+		store, err := basket.NewStore(ctx, pool, cfg)
+		if err != nil {
+			log.Printf("basket disabled: %v", err)
+		} else {
+			srv.SetBasket(store)
+			log.Printf("basket enabled (chance %d%%, edge %dbp, mult %d)", cfg.HitProbBp/100, cfg.EdgeBp, store.MultMilli())
 		}
 	}
 
