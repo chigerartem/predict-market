@@ -15,7 +15,10 @@ import (
 )
 
 var (
-	// ErrInsufficient — the player can't cover the spin price.
+	// ErrStakeTooSmall / ErrStakeTooLarge — stake outside the configured bounds.
+	ErrStakeTooSmall = errors.New("case: stake too small")
+	ErrStakeTooLarge = errors.New("case: stake too large")
+	// ErrInsufficient — the player can't cover the stake.
 	ErrInsufficient = errors.New("case: insufficient balance")
 	// ErrHouseCantCover — the treasury can't cover this payout. With the treasury
 	// allowed to go negative (migration 0014) this should not fire, but we keep the
@@ -24,15 +27,16 @@ var (
 )
 
 // Config tunes the economics. The prize table (multipliers + weights) lives in fair.go;
-// here we only set the per-spin price. Amounts are nano-TON.
+// the player stakes any amount and wins stake × multiplier. Amounts are nano-TON.
 type Config struct {
-	PriceNano int64
+	MinStakeNano int64
+	MaxStakeNano int64 // 0 = no cap
 }
 
-// DefaultConfig: 1 TON per spin. The edge (10%) is baked into the prize-table weights,
-// not here. Change PriceNano to reprice the case (prizes scale with it).
+// DefaultConfig: min stake 0.1 TON, NO max (0 = uncapped — same call as dice; the real
+// cap is the player's balance). The edge (10%) is baked into the prize-table weights.
 func DefaultConfig() Config {
-	return Config{PriceNano: 1_000_000_000}
+	return Config{MinStakeNano: 100_000_000, MaxStakeNano: 0}
 }
 
 // Store persists per-user seeds and spins and books the money through the ledger.
@@ -88,17 +92,23 @@ type SpinResult struct {
 	PrizeIndex     int
 	Rarity         string
 	MultMilli      int64
-	PriceNano      int64
+	StakeNano      int64
 	PayoutNano     int64
 	BalanceNano    int64
 	ServerSeedHash string
 }
 
-// Open plays one instant spin for userID: it locks the price in escrow, draws the prize
-// from the user's seed at the next nonce, settles the payout, and records the spin — all
-// in one transaction. Returns the result and the new balance.
-func (s *Store) Open(ctx context.Context, userID int64) (SpinResult, error) {
-	price := s.cfg.PriceNano
+// Open plays one instant spin for userID at the chosen stake: it locks the stake in
+// escrow, draws the prize from the user's seed at the next nonce, settles the payout
+// (stake × multiplier), and records the spin — all in one transaction. Returns the
+// result and the new balance.
+func (s *Store) Open(ctx context.Context, userID, stakeNano int64) (SpinResult, error) {
+	if stakeNano < s.cfg.MinStakeNano {
+		return SpinResult{}, ErrStakeTooSmall
+	}
+	if s.cfg.MaxStakeNano > 0 && stakeNano > s.cfg.MaxStakeNano {
+		return SpinResult{}, ErrStakeTooLarge
+	}
 	if err := s.ensureSeed(ctx, userID); err != nil {
 		return SpinResult{}, err
 	}
@@ -127,26 +137,26 @@ func (s *Store) Open(ctx context.Context, userID int64) (SpinResult, error) {
 
 	idx := Draw(serverSeed, clientSeed, nonce)
 	prize := Prizes[idx]
-	payout := payoutNano(price, prize.MultMilli)
+	payout := payoutNano(stakeNano, prize.MultMilli)
 
 	var spinID int64
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO case_spins (user_id, nonce, price_nano, prize_index, rarity,
+		`INSERT INTO case_spins (user_id, nonce, stake_nano, prize_index, rarity,
 		                         mult_milli, payout_nano)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		userID, nonce, price, idx, prize.Rarity, prize.MultMilli, payout).
+		userID, nonce, stakeNano, idx, prize.Rarity, prize.MultMilli, payout).
 		Scan(&spinID); err != nil {
 		return SpinResult{}, err
 	}
 	ref := fmt.Sprintf("case_spin:%d", spinID)
 
-	// place: lock the price in escrow (rejects if the player can't cover it).
+	// place: lock the stake in escrow (rejects if the player can't cover it).
 	placeTx, err := ledger.PostTx(ctx, tx, ledger.Posting{
 		Kind:      "case_place",
 		Reference: ref,
 		Entries: []ledger.Entry{
-			{AccountID: userAcct, AmountNano: -price},
-			{AccountID: s.escrow, AmountNano: price},
+			{AccountID: userAcct, AmountNano: -stakeNano},
+			{AccountID: s.escrow, AmountNano: stakeNano},
 		},
 	})
 	if err != nil {
@@ -156,17 +166,17 @@ func (s *Store) Open(ctx context.Context, userID int64) (SpinResult, error) {
 		return SpinResult{}, err
 	}
 
-	// settle: release the price from escrow, pay the player their payout, and the house
+	// settle: release the stake from escrow, pay the player their payout, and the house
 	// keeps (or, on a >1× win, pays) the difference. Zero legs are omitted.
-	//   escrow -price ; user +payout ; treasury +(price-payout)
-	// payout=0    → escrow→treasury (house keeps the whole price)
-	// payout=price→ escrow→user      (break-even, treasury untouched)
-	// payout>price→ treasury pays the profit (may push it negative; allowed by 0014)
-	entries := []ledger.Entry{{AccountID: s.escrow, AmountNano: -price}}
+	//   escrow -stake ; user +payout ; treasury +(stake-payout)
+	// payout=0     → escrow→treasury (house keeps the whole stake)
+	// payout=stake → escrow→user      (break-even, treasury untouched)
+	// payout>stake → treasury pays the profit (may push it negative; allowed by 0014)
+	entries := []ledger.Entry{{AccountID: s.escrow, AmountNano: -stakeNano}}
 	if payout > 0 {
 		entries = append(entries, ledger.Entry{AccountID: userAcct, AmountNano: payout})
 	}
-	if houseDelta := price - payout; houseDelta != 0 {
+	if houseDelta := stakeNano - payout; houseDelta != 0 {
 		entries = append(entries, ledger.Entry{AccountID: s.treasury, AmountNano: houseDelta})
 	}
 	settleTx, err := ledger.PostTx(ctx, tx, ledger.Posting{
@@ -201,7 +211,7 @@ func (s *Store) Open(ctx context.Context, userID int64) (SpinResult, error) {
 	}
 	return SpinResult{
 		SpinID: spinID, Nonce: nonce, PrizeIndex: idx, Rarity: prize.Rarity,
-		MultMilli: prize.MultMilli, PriceNano: price, PayoutNano: payout,
+		MultMilli: prize.MultMilli, StakeNano: stakeNano, PayoutNano: payout,
 		BalanceNano: bal, ServerSeedHash: hash,
 	}, nil
 }
@@ -211,7 +221,8 @@ type State struct {
 	ServerSeedHash string
 	ClientSeed     string
 	Nonce          int64
-	PriceNano      int64
+	MinStakeNano   int64
+	MaxStakeNano   int64
 	Prizes         []Prize
 	Recent         []SpinRow
 }
@@ -220,7 +231,7 @@ type State struct {
 type SpinRow struct {
 	ID         int64     `json:"id"`
 	Nonce      int64     `json:"nonce"`
-	PriceNano  int64     `json:"price_nano"`
+	StakeNano  int64     `json:"stake_nano"`
 	PrizeIndex int       `json:"prize_index"`
 	Rarity     string    `json:"rarity"`
 	MultMilli  int64     `json:"mult_milli"`
@@ -234,7 +245,7 @@ func (s *Store) State(ctx context.Context, userID int64) (State, error) {
 	if err := s.ensureSeed(ctx, userID); err != nil {
 		return State{}, err
 	}
-	st := State{PriceNano: s.cfg.PriceNano, Prizes: Prizes}
+	st := State{MinStakeNano: s.cfg.MinStakeNano, MaxStakeNano: s.cfg.MaxStakeNano, Prizes: Prizes}
 	if err := s.pool.QueryRow(ctx,
 		`SELECT server_seed_hash, client_seed, nonce FROM case_seeds WHERE user_id = $1`, userID).
 		Scan(&st.ServerSeedHash, &st.ClientSeed, &st.Nonce); err != nil {
@@ -251,7 +262,7 @@ func (s *Store) State(ctx context.Context, userID int64) (State, error) {
 // RecentSpins returns the user's last n spins, newest first.
 func (s *Store) RecentSpins(ctx context.Context, userID int64, n int) ([]SpinRow, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, nonce, price_nano, prize_index, rarity, mult_milli, payout_nano, created_at
+		`SELECT id, nonce, stake_nano, prize_index, rarity, mult_milli, payout_nano, created_at
 		   FROM case_spins WHERE user_id = $1 ORDER BY id DESC LIMIT $2`, userID, n)
 	if err != nil {
 		return nil, err
@@ -260,7 +271,7 @@ func (s *Store) RecentSpins(ctx context.Context, userID int64, n int) ([]SpinRow
 	out := make([]SpinRow, 0, n)
 	for rows.Next() {
 		var r SpinRow
-		if err := rows.Scan(&r.ID, &r.Nonce, &r.PriceNano, &r.PrizeIndex, &r.Rarity,
+		if err := rows.Scan(&r.ID, &r.Nonce, &r.StakeNano, &r.PrizeIndex, &r.Rarity,
 			&r.MultMilli, &r.PayoutNano, &r.CreatedAt); err != nil {
 			return nil, err
 		}

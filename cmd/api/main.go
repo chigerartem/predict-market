@@ -169,15 +169,15 @@ func main() {
 	// to go negative (migration 0014) — the operator tops up the float.
 	if envBool("CASE_ENABLED", true) {
 		cfg := casegame.DefaultConfig()
-		if v := envInt("CASE_PRICE_NANO", 0); v > 0 {
-			cfg.PriceNano = v
+		if v := envInt("CASE_MAX_STAKE_NANO", 0); v > 0 {
+			cfg.MaxStakeNano = v
 		}
 		store, err := casegame.NewStore(ctx, pool, cfg)
 		if err != nil {
 			log.Printf("case disabled: %v", err)
 		} else {
 			srv.SetCase(store)
-			log.Printf("case enabled (price %d nano)", cfg.PriceNano)
+			log.Printf("case enabled (min stake %d nano)", cfg.MinStakeNano)
 		}
 	}
 

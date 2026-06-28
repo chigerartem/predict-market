@@ -619,21 +619,34 @@ func (s *Server) handleCaseState(w http.ResponseWriter, r *http.Request, userID 
 		ServerSeedHash: st.ServerSeedHash,
 		ClientSeed:     st.ClientSeed,
 		Nonce:          st.Nonce,
-		PriceNano:      st.PriceNano,
+		MinStakeNano:   st.MinStakeNano,
+		MaxStakeNano:   st.MaxStakeNano,
 		Prizes:         st.Prizes,
 		Recent:         st.Recent,
 	})
 }
 
-// handleCaseOpen plays one instant case open: locks the price, draws a prize, settles.
+// handleCaseOpen plays one instant case open at the player's chosen stake: locks the
+// stake, draws a prize, settles stake × multiplier.
 func (s *Server) handleCaseOpen(w http.ResponseWriter, r *http.Request, userID int64) {
 	if s.caseStore == nil {
 		writeErr(w, http.StatusServiceUnavailable, "case unavailable")
 		return
 	}
-	res, err := s.caseStore.Open(r.Context(), userID)
+	var req struct {
+		StakeNano int64 `json:"stake_nano"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	res, err := s.caseStore.Open(r.Context(), userID, req.StakeNano)
 	if err != nil {
 		switch {
+		case errors.Is(err, casegame.ErrStakeTooSmall):
+			writeErr(w, http.StatusBadRequest, "stake too small")
+		case errors.Is(err, casegame.ErrStakeTooLarge):
+			writeErr(w, http.StatusBadRequest, "stake too large")
 		case errors.Is(err, casegame.ErrInsufficient):
 			writeErr(w, http.StatusBadRequest, "insufficient balance")
 		case errors.Is(err, casegame.ErrHouseCantCover):
@@ -650,7 +663,7 @@ func (s *Server) handleCaseOpen(w http.ResponseWriter, r *http.Request, userID i
 		PrizeIndex:     res.PrizeIndex,
 		Rarity:         res.Rarity,
 		MultMilli:      res.MultMilli,
-		PriceNano:      res.PriceNano,
+		StakeNano:      res.StakeNano,
 		PayoutNano:     res.PayoutNano,
 		BalanceNano:    res.BalanceNano,
 		ServerSeedHash: res.ServerSeedHash,
@@ -816,7 +829,8 @@ type caseStateDTO struct {
 	ServerSeedHash string             `json:"server_seed_hash"`
 	ClientSeed     string             `json:"client_seed"`
 	Nonce          int64              `json:"nonce"`
-	PriceNano      int64              `json:"price_nano"`
+	MinStakeNano   int64              `json:"min_stake_nano"`
+	MaxStakeNano   int64              `json:"max_stake_nano"`
 	Prizes         []casegame.Prize   `json:"prizes"` // order = reel tiers; weights hidden
 	Recent         []casegame.SpinRow `json:"recent"`
 }
@@ -827,7 +841,7 @@ type caseSpinDTO struct {
 	PrizeIndex     int    `json:"prize_index"`
 	Rarity         string `json:"rarity"`
 	MultMilli      int64  `json:"mult_milli"`
-	PriceNano      int64  `json:"price_nano"`
+	StakeNano      int64  `json:"stake_nano"`
 	PayoutNano     int64  `json:"payout_nano"`
 	BalanceNano    int64  `json:"balance_nano"`
 	ServerSeedHash string `json:"server_seed_hash"`
