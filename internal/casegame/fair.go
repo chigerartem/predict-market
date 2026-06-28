@@ -22,12 +22,12 @@ import (
 
 // Rarity tiers, low → high. The client colours each reel card by these.
 const (
-	RarityGrey   = "grey"   // common: «мимо» (0×) and «труха» (0.5×)
-	RarityBlue   = "blue"   // uncommon: возврат (1×)
-	RarityPurple = "purple" // rare (2×)
-	RarityPink   = "pink"   // epic (5×)
-	RarityRed    = "red"    // mythical (25×)
-	RarityGold   = "gold"   // legendary: джекпот (200×)
+	RarityGrey   = "grey"   // «пусто» (0×) — ставка теряется
+	RarityBlue   = "blue"   // 2×
+	RarityPurple = "purple" // 3×
+	RarityPink   = "pink"   // 7×
+	RarityRed    = "red"    // 25×
+	RarityGold   = "gold"   // джекпот (200×)
 )
 
 // Prize is one outcome bucket: a payout multiplier (×1000) drawn with the given integer
@@ -39,28 +39,28 @@ type Prize struct {
 }
 
 // Prizes is the fixed prize table. Designed for RTP 90% (house edge 10%): the expected
-// payout Σ(weight/total · mult) over the 10000 total weight equals 0.90× the price. The
-// shape is "case-like" — most spins miss or return scraps, the tail is rare and fat:
+// payout Σ(weight/total · mult) over the 100000 total weight equals 0.90× the stake.
+// Per Артём's call there is NO partial-return tier: a spin is either «пусто» (the stake
+// is lost) or a real multiplier (≥2×). The shape is "case-like" — most spins are empty,
+// the winning tail is rare and fat:
 //
-//	mult   chance     1 in    contribution
-//	0×     27.86%        4     0.0000
-//	0.5×   34.00%        3     0.1700
-//	1×     27.00%        4     0.2700
-//	2×      8.50%       12     0.1700
-//	5×      2.20%       45     0.1100
-//	25×     0.40%      250     0.1000
-//	200×    0.04%     2500     0.0800   → Σ = 0.9000 (RTP 90%)
+//	mult   chance      1 in    contribution
+//	0×     67.38%        1.5    0.0000   (пусто)
+//	2×     25.00%        4      0.5000
+//	3×      6.00%       17      0.1800
+//	7×      1.20%       83      0.0840
+//	25×     0.40%      250      0.1000
+//	200×    0.018%    5556      0.0360   → Σ = 0.9000 (RTP 90%)
 //
 // To re-tune the edge, change the weights and keep TotalWeight in sync (it is summed at
 // init, so just edit the slice).
 var Prizes = []Prize{
-	{Rarity: RarityGrey, MultMilli: 0, Weight: 2786},     // мимо
-	{Rarity: RarityGrey, MultMilli: 500, Weight: 3400},   // труха  (0.5×)
-	{Rarity: RarityBlue, MultMilli: 1000, Weight: 2700},  // возврат (1×)
-	{Rarity: RarityPurple, MultMilli: 2000, Weight: 850}, // 2×
-	{Rarity: RarityPink, MultMilli: 5000, Weight: 220},   // 5×
-	{Rarity: RarityRed, MultMilli: 25000, Weight: 40},    // 25×
-	{Rarity: RarityGold, MultMilli: 200000, Weight: 4},   // джекпот (200×)
+	{Rarity: RarityGrey, MultMilli: 0, Weight: 67382},     // пусто — ставка теряется
+	{Rarity: RarityBlue, MultMilli: 2000, Weight: 25000},  // 2×
+	{Rarity: RarityPurple, MultMilli: 3000, Weight: 6000}, // 3×
+	{Rarity: RarityPink, MultMilli: 7000, Weight: 1200},   // 7×
+	{Rarity: RarityRed, MultMilli: 25000, Weight: 400},    // 25×
+	{Rarity: RarityGold, MultMilli: 200000, Weight: 18},   // джекпот (200×)
 }
 
 // TotalWeight is the sum of all prize weights (the draw is modulo this).
