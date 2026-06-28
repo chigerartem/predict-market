@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 
-/** Блокирует прокрутку body и красит native-шапку Telegram (по умолчанию тёмная),
- *  пока active === true. headerColor — цвет шапки на время блокировки. */
-export function useBodyScrollLock(active: boolean, headerColor: string = "#000000") {
+/** Блокирует прокрутку body (и режет touchmove на iOS), пока active === true.
+ *  Цвет native-шапки Telegram НЕ трогаем намеренно: при открытии модалки (ставка,
+ *  депозит…) плашка должна оставаться цвета текущей вкладки, а не прыгать в navy. */
+export function useBodyScrollLock(active: boolean) {
   useEffect(() => {
     if (!active) return;
 
@@ -38,24 +39,11 @@ export function useBodyScrollLock(active: boolean, headerColor: string = "#00000
     };
     document.addEventListener("touchmove", onTouchMove, { passive: false });
 
-    const tg = window.Telegram?.WebApp;
-    const prevHeader = tg?.headerColor;
-    try {
-      tg?.setHeaderColor?.(headerColor);
-    } catch {
-      // старые Telegram-клиенты не понимают hex — игнорируем
-    }
-
     return () => {
       document.body.style.overflow = prevBodyOverflow;
       document.body.style.overscrollBehavior = prevBodyOverscroll;
       if (scroller) scroller.style.overflow = prevMainOverflow;
       document.removeEventListener("touchmove", onTouchMove);
-      try {
-        tg?.setHeaderColor?.(prevHeader || "#0A0E16");
-      } catch {
-        // ignore
-      }
     };
-  }, [active, headerColor]);
+  }, [active]);
 }

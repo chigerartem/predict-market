@@ -13,7 +13,7 @@ type Slide = { key: string; lottie: string; titleKey: TKey; textKey: TKey };
 const SLIDES: Slide[] = [
   {
     key: "what",
-    lottie: "/lottie/onb-cashback.json",
+    lottie: "/lottie/onb-predict.json",
     titleKey: "onb.slide1Title",
     textKey: "onb.slide1Text",
   },

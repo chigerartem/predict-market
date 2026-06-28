@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
-import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
-import { useKeyboardInsetSheet } from "../hooks/useKeyboardInsetSheet";
 import { placeBet, type Market, type MarketOutcome } from "../realapi";
 import { fmtTon } from "../format";
-import { useT } from "../i18n";
+import { useT, type TFunc } from "../i18n";
+import BottomSheet from "./BottomSheet";
 import TonIcon from "./TonIcon";
 
 // Минимальная ставка — зеркалит betting.MinStakeNano (0.1 TON) на бэке.
@@ -27,8 +25,6 @@ export default function BetModal({ open, onClose, market, outcome, balanceTon, o
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
-  useBodyScrollLock(open, "#0A0E16");
-  const sheetRef = useKeyboardInsetSheet(open);
   useEffect(() => {
     if (open) {
       setStake("1");
@@ -62,21 +58,9 @@ export default function BetModal({ open, onClose, market, outcome, balanceTon, o
     }
   };
 
-  return createPortal(
-    // Без тёмной ширмы: прозрачный контейнер, карточка выезжает снизу прямо на фон
-    // Home. Затемнения нет → на стыке с шапкой TG и под клавиатурой нечему «рваться»
-    // (любая тёмная заливка контрастировала с голубым фоном и читалась как разрыв).
-    // Карточка тёмная/непрозрачная — сама выделяется. Контейнер по высоте синкается с
-    // visualViewport (useKeyboardInsetSheet) → карточка садится над клавиатурой.
-    <div
-      ref={sheetRef}
-      className="fixed inset-x-0 top-0 z-50 flex h-full items-end justify-center"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-full w-full max-w-md overflow-y-auto rounded-t-3xl bg-neutral-900 p-5 pb-8 text-white sm:mb-4 sm:rounded-3xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+  return (
+    <BottomSheet open={open} onClose={onClose}>
+      <div>
         <div className="mb-4 flex items-center justify-between">
           <div className="text-base font-semibold">{t("bet.title")}</div>
           <button
@@ -92,18 +76,20 @@ export default function BetModal({ open, onClose, market, outcome, balanceTon, o
 
         {done ? (
           <div className="flex flex-col items-center py-6 text-center">
-            <span className="grid h-16 w-16 place-items-center rounded-full bg-emerald-500/15 text-3xl text-emerald-400">
+            <span className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-emerald-400 to-green-600 text-3xl text-white shadow-lg shadow-emerald-500/40">
               ✓
             </span>
-            <div className="mt-4 text-lg font-semibold">{t("bet.success")}</div>
+            <div className="mt-4 text-lg font-bold">{t("bet.success")}</div>
           </div>
         ) : (
           <>
             <p className="mb-3 text-sm leading-snug text-neutral-300">{market.title}</p>
 
-            <div className="mb-4 rounded-2xl border border-sky-400/40 bg-sky-400/10 p-3.5">
-              <span className="text-sm font-semibold text-white">{outcome.title}</span>
+            <div className="mb-4 rounded-2xl border border-sky-400/50 bg-gradient-to-r from-sky-500/25 to-blue-500/20 p-3.5 shadow-md shadow-sky-500/10">
+              <span className="text-sm font-bold text-white">{outcome.title}</span>
             </div>
+
+            <MarketInfo market={market} t={t} />
 
             <label className="mb-1.5 block text-xs font-medium text-neutral-400">{t("bet.amount")}</label>
             <div className="mb-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3.5">
@@ -156,14 +142,71 @@ export default function BetModal({ open, onClose, market, outcome, balanceTon, o
             <button
               onClick={submit}
               disabled={!valid || busy}
-              className="w-full rounded-2xl bg-sky-500 py-3.5 text-sm font-semibold text-white transition active:scale-[0.99] enabled:hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full rounded-2xl bg-gradient-to-r from-sky-400 to-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-sky-500/30 transition active:scale-[0.99] enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
             >
               {busy ? t("bet.placing") : `${t("bet.place")} · ${fmtTon(stakeNum)} TON`}
             </button>
           </>
         )}
       </div>
-    </div>,
-    document.body,
+    </BottomSheet>
   );
+}
+
+// Пояснение к рынку на экране ставки: время матча + «как резолвится» (description) +
+// «превью» (context_description) — всё с Polymarket. Длинные тексты сворачиваются.
+function MarketInfo({ market, t }: { market: Market; t: TFunc }) {
+  if (!market.game_start_time && !market.description && !market.context_description) return null;
+  return (
+    <div className="mb-4 space-y-3">
+      {market.game_start_time && (
+        <div className="flex items-center gap-1.5 text-xs text-neutral-400">
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          {fmtGameStart(market.game_start_time)}
+        </div>
+      )}
+      {market.description && (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{t("bet.resolves")}</div>
+          <ExpandableText text={market.description} t={t} />
+        </div>
+      )}
+      {market.context_description && (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{t("bet.preview")}</div>
+          <ExpandableText text={market.context_description} t={t} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Текст с обрезкой до 3 строк и кнопкой «Ещё/Свернуть» (только если он длинный).
+function ExpandableText({ text, t }: { text: string; t: TFunc }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 160;
+  return (
+    <>
+      <p className={"whitespace-pre-line text-xs leading-relaxed text-neutral-300 " + (long && !open ? "line-clamp-3" : "")}>
+        {text}
+      </p>
+      {long && (
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="mt-1 text-[11px] font-semibold text-sky-300 hover:text-sky-200"
+        >
+          {open ? t("bet.less") : t("bet.more")}
+        </button>
+      )}
+    </>
+  );
+}
+
+function fmtGameStart(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }

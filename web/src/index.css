@@ -13,7 +13,9 @@ html, body, #root {
 }
 
 html {
-  touch-action: manipulation;        /* блокирует double-tap zoom */
+  /* pan-x pan-y (а НЕ manipulation!) — manipulation разрешает pinch-zoom; этот
+     набор разрешает только панорамирование и блокирует и pinch-, и double-tap-зум. */
+  touch-action: pan-x pan-y;
   -webkit-text-size-adjust: 100%;    /* запрещает автоувеличение текста */
   /* Фон обязан быть на <html>, иначе rubber-band overscroll на iOS/Telegram
      показывает белый дефолт UA вместо тёмной темы. */
@@ -24,8 +26,43 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: #0A0E16;
   color: var(--tg-theme-text-color, #fff);
-  overscroll-behavior-y: none;
+  /* НЕ ставить overflow-x:hidden — по спеке это форсит overflow-y:auto, body
+     становится прокручиваемым, и модалку можно «оттянуть» из контейнера. */
+  overscroll-behavior-y: none;       /* без rubber-band по вертикали */
 }
+
+/* Затемнение + размытие фона под всплывающей карточкой. Класс вешает BottomSheet,
+   пока карточка открыта. Это filter НА КОНТЕНТЕ (#root), а НЕ position:fixed оверлей:
+   фон стоит в обычном потоке с фиксированной высотой (--app-h), поэтому эффект НЕ
+   зависит от visualViewport и не «рвётся»/не дёргается на стыке с нативной шапкой
+   Telegram при выезде клавиатуры — ровно это ломало прежний fixed-скрим. Карточка
+   рендерится порталом в <body> (вне #root), поэтому под фильтр не попадает.
+   blur/brightness — вкус: сильнее blur → больше отрыв от фона; ниже brightness →
+   больше «чёрного». */
+#root.app-dimmed {
+  filter: blur(16px) brightness(0.5);
+}
+
+/* Падающие эмодзи на фоне экрана Games. Ровный «дождь»: одинаковый размер и
+   скорость у всех (длительность задаётся одним значением в Games.tsx), элементы
+   разнесены по колонкам и по фазе (animation-delay) равномерно — без больших
+   пробелов. Здесь только траектория: строго вертикально, сверху за экран — вниз
+   за экран, линейно, без вращения и без мерцания. */
+@keyframes gamesFall {
+  from { transform: translateY(-14vh); }
+  to   { transform: translateY(114vh); }
+}
+
+/* Персонажи, пролетающие мимо ракеты в полёте (мы летим вверх → они вниз). */
+@keyframes rocketDrift {
+  from { transform: translateY(-22vh) rotate(-8deg); opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  to   { transform: translateY(118vh) rotate(8deg); opacity: 0; }
+}
+
+/* Обломки ракеты при крахе теперь анимируются физикой в rAF (RocketWreck в
+   RocketGame.tsx): кувырок + параболический разлёт. CSS-кейфреймов больше нет. */
 
 /* Скрыть scrollbar, но оставить возможность прокрутки */
 * {

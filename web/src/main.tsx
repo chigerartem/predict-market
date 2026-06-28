@@ -1,9 +1,15 @@
+import "./polyfills"; // ставит globalThis.Buffer до загрузки @ton/core — держать первым
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { TonConnectUIProvider } from "@tonconnect/ui-react";
 import App from "./App";
 import { I18nProvider } from "./i18n";
 import { installTapHaptics } from "./haptics";
 import "./index.css";
+
+// Манифест отдаётся nginx из web/public. URL абсолютный — его читает кошелёк (внешнее
+// приложение), а не только наш фронт.
+const TONCONNECT_MANIFEST = "https://market.kopix.online/tonconnect-manifest.json";
 
 if (window.Telegram?.WebApp) {
   const tg = window.Telegram.WebApp;
@@ -85,8 +91,25 @@ installTapHaptics();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <I18nProvider>
-      <App />
-    </I18nProvider>
+    <TonConnectUIProvider
+      manifestUrl={TONCONNECT_MANIFEST}
+      // twaReturnUrl — куда кошелёк возвращает ПОСЛЕ подписи/коннекта. КРИТИЧНО: это
+      // должна быть ссылка, которая переоткрывает САМ Mini App, а не чат бота. Голый
+      // https://t.me/mmetricbot открывает ЧАТ — WebView не переоткрывался, и SDK не
+      // до-забирал ответ кошелька с SSE-bridge (усыплённый WebView на iOS) → коннект
+      // «висел» на «Connect». `?startapp=...` открывает Main Mini App бота напрямую
+      // (он настроен в BotFather на market.kopix.online) → SDK переинициализируется,
+      // переподключает bridge (хосты открыты в CSP nginx.conf) и финализирует коннект/
+      // оплату. Значение startapp произвольное — start_param мы нигде не читаем.
+      // returnStrategy 'back' — подстраховка для клиентов без TWA-возврата.
+      actionsConfiguration={{
+        returnStrategy: "back",
+        twaReturnUrl: "https://t.me/mmetricbot?startapp=tonconnect",
+      }}
+    >
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    </TonConnectUIProvider>
   </React.StrictMode>,
 );

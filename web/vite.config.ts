@@ -9,6 +9,10 @@ import react from "@vitejs/plugin-react";
 // В dev (command === "serve") всё остаётся — отладка не страдает.
 export default defineConfig(({ command }) => ({
   plugins: [react()],
+  // @ton/core (сборка memo-коммента для TON-депозита) и часть TON Connect ссылаются на
+  // Node-овский `global`; в браузере его нет → маппим на globalThis. Buffer ставит
+  // src/polyfills.ts. Без этого сборка проходит, но падает в рантайме «global is not defined».
+  define: { global: "globalThis" },
   build: {
     outDir: "dist",
     sourcemap: false,
