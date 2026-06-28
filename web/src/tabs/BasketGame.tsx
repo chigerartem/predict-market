@@ -18,8 +18,6 @@ import { getLottieData } from "../lottieCache";
 
 const MIN_NANO = 100_000_000; // 0.1 TON (бэкенд тоже проверяет)
 const PRESETS = [0.1, 1, 5, 25];
-const HIT_ANIMS = ["basket-hit-1", "basket-hit-2"];
-const MISS_ANIMS = ["basket-miss-1", "basket-miss-2", "basket-miss-3"];
 const IDLE_ANIM = "basket-hit-1"; // первый кадр = мяч готов; кэшируется для мгновенного покоя
 const THROW_SPEED = 1.15; // бросок ~3с → ~2.6с
 const THROW_FALLBACK_MS = 3200; // страховка, если onComplete не придёт
@@ -48,8 +46,7 @@ function normStake(raw: string): string {
   return s;
 }
 
-const fmtMult = (milli: number) => (milli / 1000).toFixed(2);
-const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
+const fmtMult = (milli: number) => (milli / 1000).toFixed(milli % 1000 === 0 ? 0 : milli % 100 === 0 ? 1 : 2);
 
 type Phase = "idle" | "throwing" | "revealed";
 
@@ -60,7 +57,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
   const [stake, setStake] = useState("0.1");
   const [phase, setPhase] = useState<Phase>("idle");
   const [throwSeq, setThrowSeq] = useState(0);
-  const [throwAnim, setThrowAnim] = useState(MISS_ANIMS[0]);
+  const [throwAnim, setThrowAnim] = useState("basket-miss-1");
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<{ hit: boolean; payout: number; mult: number } | null>(null);
   const [recent, setRecent] = useState<BasketThrowRow[]>([]);
@@ -72,8 +69,8 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
   const fallbackRef = useRef<number>(0);
 
   const minNano = st?.min_stake_nano ?? MIN_NANO;
-  const mult = st?.mult_milli ?? 1880;
   const chancePct = (st?.hit_prob_bp ?? 5000) / 100;
+  const scoreMults = (st?.scores ?? []).map((s) => fmtMult(s.mult_milli) + "×").join(" / ");
 
   // Высоту clip-слоя выставляем СИНХРОННО до первого paint (useLayoutEffect + первый sync
   // вне rAF); в расфокусе — стабильная --app-h, в фокусе — visualViewport (клавиатура).
@@ -184,7 +181,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
     try {
       const res = await basketThrow(nano);
       ctxRef.current = res;
-      setThrowAnim(pick(res.hit ? HIT_ANIMS : MISS_ANIMS));
+      setThrowAnim(res.anim);
       settledRef.current = false;
       setPhase("throwing");
       setThrowSeq((k) => k + 1);
@@ -280,7 +277,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
             <div className="mb-2 flex items-center justify-center gap-3 text-[11px] font-medium text-white/50">
               <span>{t("basket.chance")} {chancePct.toFixed(0)}%</span>
               <span className="h-1 w-1 rounded-full bg-white/30" />
-              <span className="text-orange-300">{fmtMult(mult)}×</span>
+              <span className="text-orange-300">{scoreMults || "—"}</span>
             </div>
 
             {/* Ставка */}

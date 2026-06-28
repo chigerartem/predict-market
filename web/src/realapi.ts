@@ -359,13 +359,14 @@ export type BasketThrowRow = {
   created_at: string;
 };
 
+export type BasketScore = { mult_milli: number; chance_bp: number }; // winning tier
+
 export type BasketState = {
   server_seed_hash: string;
   client_seed: string;
   nonce: number;
-  hit_prob_bp: number; // score chance (5000 = 50%)
-  edge_bp: number;
-  mult_milli: number; // win multiplier ×1000
+  hit_prob_bp: number; // total score chance (5000 = 50%)
+  scores: BasketScore[]; // winning multipliers + their chances, low → high
   min_stake_nano: number;
   max_stake_nano: number;
   recent: BasketThrowRow[];
@@ -375,6 +376,8 @@ export type BasketThrowResult = {
   throw_id: number;
   nonce: number;
   roll: number;
+  outcome_index: number;
+  anim: string; // lottie name to play for this landing (server-authoritative)
   hit: boolean;
   mult_milli: number;
   stake_nano: number;
