@@ -258,6 +258,8 @@ func (s *Server) handlePlaceBet(w http.ResponseWriter, r *http.Request, userID i
 			writeErr(w, http.StatusBadRequest, "stake too small")
 		case errors.Is(err, betting.ErrLimitExceeded):
 			writeErr(w, http.StatusBadRequest, "bet limit exceeded")
+		case errors.Is(err, betting.ErrAlreadyBet):
+			writeErr(w, http.StatusConflict, "already bet on this market")
 		default:
 			writeErr(w, http.StatusBadRequest, "could not place bet (check balance)")
 		}

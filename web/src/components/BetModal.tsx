@@ -52,7 +52,9 @@ export default function BetModal({ open, onClose, market, outcome, balanceTon, o
       onSuccess();
       window.setTimeout(onClose, 1200);
     } catch (e) {
-      setErr(e instanceof Error && e.message ? e.message : t("bet.error"));
+      const msg = e instanceof Error ? e.message : "";
+      // Бэкенд запрещает вторую ставку на то же событие → показываем понятный текст.
+      setErr(msg.includes("already bet") ? t("bet.already") : msg || t("bet.error"));
     } finally {
       setBusy(false);
     }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { MeResponse } from "../api";
-import { fetchMarkets, fetchMe, type Market, type MarketOutcome } from "../realapi";
+import { fetchMarkets, fetchMe, fetchMyBets, type Bet, type Market, type MarketOutcome } from "../realapi";
 import { fmtTon } from "../format";
 import { useT } from "../i18n";
 import TonIcon from "../components/TonIcon";
@@ -100,6 +100,27 @@ export default function Home(_props: Props) {
       .catch(() => setMarkets((prev) => prev ?? []));
   }, []);
 
+  // Активные ставки юзера (PLACED). Нужны, чтобы в ленте пометить «ставка сделана» и
+  // не дать поставить второй раз: правило — одна ставка на событие (нельзя на второй
+  // исход, нельзя повторно в ту же сторону). Бэкенд это тоже жёстко запрещает.
+  const [bets, setBets] = useState<Bet[]>([]);
+  const loadBets = useCallback(() => {
+    fetchMyBets().then(setBets).catch(() => {});
+  }, []);
+  useEffect(() => {
+    loadBets();
+  }, [loadBets]);
+  const activeBets = useMemo(() => {
+    const m = new Map<number, Bet>();
+    for (const b of bets) if (b.status === "PLACED") m.set(b.market_id, b);
+    return m;
+  }, [bets]);
+  // После успешной ставки обновляем и баланс, и список ставок (лента сразу запирается).
+  const afterBet = useCallback(() => {
+    loadBalance();
+    loadBets();
+  }, [loadBalance, loadBets]);
+
   const balanceTon = (balanceNano ?? 0) / 1_000_000_000;
 
   const filtered = useMemo(() => {
@@ -181,6 +202,7 @@ export default function Home(_props: Props) {
               <MarketCard
                 key={m.id}
                 market={m}
+                userBet={activeBets.get(m.id) ?? null}
                 onPick={(market, outcome) => setBet({ market, outcome })}
               />
             ))}
@@ -204,7 +226,7 @@ export default function Home(_props: Props) {
         market={bet?.market ?? null}
         outcome={bet?.outcome ?? null}
         balanceTon={balanceTon}
-        onSuccess={loadBalance}
+        onSuccess={afterBet}
       />
     </div>
   );
@@ -212,11 +234,15 @@ export default function Home(_props: Props) {
 
 function MarketCard({
   market,
+  userBet,
   onPick,
 }: {
   market: Market;
+  userBet: Bet | null;
   onPick: (market: Market, outcome: MarketOutcome) => void;
 }) {
+  const t = useT();
+  const locked = userBet !== null;
   return (
     <div className="rounded-2xl border border-white/10 bg-[#11151C] p-3.5">
       <div className="mb-3 flex items-start gap-3">
@@ -249,19 +275,43 @@ function MarketCard({
       </div>
 
       <div className="flex gap-2">
-        {market.outcomes.map((o) => (
-          <button
-            key={o.id}
-            onClick={() => onPick(market, o)}
-            className="min-w-0 flex-1 rounded-xl border border-sky-400/25 bg-sky-500/[0.07] px-3 py-2.5 text-left transition active:scale-[0.97] hover:border-sky-400/50 hover:bg-sky-500/[0.14]"
-          >
-            <div className="truncate text-xs text-neutral-300">{o.title}</div>
-            <div className="text-base font-bold tabular-nums text-sky-300">
-              {(o.odds_milli / 1000).toFixed(2)}
-            </div>
-          </button>
-        ))}
+        {market.outcomes.map((o) => {
+          const mine = userBet?.outcome_id === o.id;
+          return (
+            <button
+              key={o.id}
+              onClick={() => onPick(market, o)}
+              disabled={locked}
+              className={
+                "min-w-0 flex-1 rounded-xl border px-3 py-2.5 text-left transition disabled:cursor-default " +
+                (mine
+                  ? "border-emerald-400/60 bg-emerald-500/[0.14]"
+                  : locked
+                    ? "border-white/10 bg-white/[0.02] opacity-45"
+                    : "border-sky-400/25 bg-sky-500/[0.07] active:scale-[0.97] hover:border-sky-400/50 hover:bg-sky-500/[0.14]")
+              }
+            >
+              <div className="flex items-center gap-1 text-xs text-neutral-300">
+                {mine && (
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-emerald-400" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12l5 5L20 6" />
+                  </svg>
+                )}
+                <span className="min-w-0 truncate">{o.title}</span>
+              </div>
+              <div className={"text-base font-bold tabular-nums " + (mine ? "text-emerald-300" : "text-sky-300")}>
+                {(o.odds_milli / 1000).toFixed(2)}
+              </div>
+            </button>
+          );
+        })}
       </div>
+
+      {userBet && (
+        <div className="mt-2 text-center text-[11px] font-medium text-emerald-300/80">
+          {t("home.alreadyBet")} · {fmtTon(userBet.stake_nano / 1_000_000_000)} TON
+        </div>
+      )}
     </div>
   );
 }

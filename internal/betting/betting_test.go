@@ -173,6 +173,35 @@ func TestBetLifecycleWinAndLose(t *testing.T) {
 	}
 }
 
+func TestPlaceBetDuplicateRejected(t *testing.T) {
+	reset(t)
+	ctx := context.Background()
+	capitalize(t, 1000*TON)
+	mk := twoOutcomeMarket(t, 2000, 2000, nil)
+	fund(t, 1, 100*TON)
+
+	if _, err := betting.PlaceBet(ctx, pool, 1, mk.Outcomes[0].ID, 10*TON); err != nil {
+		t.Fatalf("first bet: %v", err)
+	}
+	// Второй раз в ту же сторону — запрещено.
+	if _, err := betting.PlaceBet(ctx, pool, 1, mk.Outcomes[0].ID, 10*TON); !errors.Is(err, betting.ErrAlreadyBet) {
+		t.Fatalf("same outcome: err = %v, want ErrAlreadyBet", err)
+	}
+	// На второй исход того же рынка — тоже запрещено (нельзя хеджировать).
+	if _, err := betting.PlaceBet(ctx, pool, 1, mk.Outcomes[1].ID, 10*TON); !errors.Is(err, betting.ErrAlreadyBet) {
+		t.Fatalf("other outcome: err = %v, want ErrAlreadyBet", err)
+	}
+	// Списали ровно одну ставку (10 TON) → баланс 90.
+	if got := userBalance(t, 1); got != 90*TON {
+		t.Errorf("balance = %d, want %d (only first stake debited)", got, 90*TON)
+	}
+	// Другой юзер на тот же рынок — можно.
+	fund(t, 2, 100*TON)
+	if _, err := betting.PlaceBet(ctx, pool, 2, mk.Outcomes[0].ID, 10*TON); err != nil {
+		t.Fatalf("other user same market: %v", err)
+	}
+}
+
 func TestPlaceBetClosedMarket(t *testing.T) {
 	reset(t)
 	capitalize(t, 1000*TON)

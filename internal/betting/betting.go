@@ -25,6 +25,7 @@ var (
 	ErrMarketCancelled = errors.New("betting: market is cancelled")
 	ErrStakeTooSmall   = errors.New("betting: stake too small")
 	ErrLimitExceeded   = errors.New("betting: outcome liability limit exceeded")
+	ErrAlreadyBet      = errors.New("betting: already have an active bet on this market")
 )
 
 // Bet is a placed bet. MarketTitle/OutcomeTitle are filled by ListUserBets (joined
@@ -102,7 +103,7 @@ func PlaceBet(ctx context.Context, pool *pgxpool.Pool, userID, outcomeID, stakeN
 		   FROM outcomes o
 		   JOIN markets m ON m.id = o.market_id
 		  WHERE o.id = $1
-		  FOR UPDATE OF o`, outcomeID).Scan(
+		  FOR UPDATE OF o, m`, outcomeID).Scan(
 		&marketID, &oddsMilli, &totalPayout, &maxLiab, &status, &closeTime)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Bet{}, ErrOutcomeNotFound
@@ -115,6 +116,20 @@ func PlaceBet(ctx context.Context, pool *pgxpool.Pool, userID, outcomeID, stakeN
 	}
 	if closeTime != nil && !time.Now().Before(*closeTime) {
 		return Bet{}, ErrMarketClosed
+	}
+
+	// Одна активная ставка на рынок на пользователя: нельзя поставить ни на второй исход,
+	// ни второй раз в ту же сторону. Строка рынка залочена выше (FOR UPDATE OF m), поэтому
+	// две параллельные ставки одного юзера на РАЗНЫЕ исходы одного рынка сериализуются —
+	// проверка остаётся корректной (вторая увидит первую уже зафиксированной).
+	var hasActive bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM bets WHERE user_id = $1 AND market_id = $2 AND status = 'PLACED')`,
+		userID, marketID).Scan(&hasActive); err != nil {
+		return Bet{}, err
+	}
+	if hasActive {
+		return Bet{}, ErrAlreadyBet
 	}
 
 	payout := payoutNano(stakeNano, oddsMilli)
@@ -289,99 +304,6 @@ func SettleMarket(ctx context.Context, pool *pgxpool.Pool, marketID, winningOutc
 	if _, err := tx.Exec(ctx,
 		`UPDATE markets SET status = 'RESOLVED', resolved_outcome_id = $1, updated_at = now() WHERE id = $2`,
 		winningOutcomeID, marketID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
-// VoidMarket cancels a market and refunds every placed bet (stake back to the
-// user, reserved profit back to the treasury). Idempotent.
-func VoidMarket(ctx context.Context, pool *pgxpool.Pool, marketID int64) error {
-	escrow, err := ledger.SystemAccountID(ctx, pool, ledger.TypeBetEscrow)
-	if err != nil {
-		return err
-	}
-	reserve, err := ledger.SystemAccountID(ctx, pool, ledger.TypeLiabilityReserve)
-	if err != nil {
-		return err
-	}
-	treasury, err := ledger.SystemAccountID(ctx, pool, ledger.TypeHouseTreasury)
-	if err != nil {
-		return err
-	}
-
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	var status string
-	err = tx.QueryRow(ctx, `SELECT status FROM markets WHERE id = $1 FOR UPDATE`, marketID).Scan(&status)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrMarketNotFound
-	} else if err != nil {
-		return err
-	}
-	switch status {
-	case "CANCELLED":
-		return nil
-	case "RESOLVED":
-		return ErrMarketClosed
-	}
-
-	type pending struct {
-		id, userID, stake, payout int64
-	}
-	var bets []pending
-	rows, err := tx.Query(ctx,
-		`SELECT id, user_id, stake_nano, payout_nano
-		   FROM bets WHERE market_id = $1 AND status = 'PLACED' FOR UPDATE`, marketID)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var p pending
-		if err := rows.Scan(&p.id, &p.userID, &p.stake, &p.payout); err != nil {
-			rows.Close()
-			return err
-		}
-		bets = append(bets, p)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	for _, p := range bets {
-		profit := p.payout - p.stake
-		userAcct, err := ledger.UserBalanceID(ctx, tx, p.userID)
-		if err != nil {
-			return err
-		}
-		settleTxID, err := ledger.PostTx(ctx, tx, ledger.Posting{
-			Kind:           "bet_void",
-			Reference:      fmt.Sprintf("bet:%d", p.id),
-			IdempotencyKey: fmt.Sprintf("void:%d", p.id),
-			Entries: []ledger.Entry{
-				{AccountID: escrow, AmountNano: -p.stake},
-				{AccountID: userAcct, AmountNano: p.stake},
-				{AccountID: reserve, AmountNano: -profit},
-				{AccountID: treasury, AmountNano: profit},
-			},
-		})
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx,
-			`UPDATE bets SET status = 'VOID', settled_at = now(), ledger_tx_settle = $1 WHERE id = $2`,
-			settleTxID, p.id); err != nil {
-			return err
-		}
-	}
-
-	if _, err := tx.Exec(ctx,
-		`UPDATE markets SET status = 'CANCELLED', updated_at = now() WHERE id = $1`, marketID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
