@@ -2,32 +2,32 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import { fetchMe, fetchCaseState, caseOpen, type CaseState, type CasePrize, type CaseSpinResult, type CaseSpinRow } from "../realapi";
 import { fmtTon } from "../format";
 import { useT } from "../i18n";
+import Lottie from "../components/Lottie";
 import TonIcon from "../components/TonIcon";
 
 // «Кейсы» — мгновенная игра в стиле открытия кейсов CS:GO. Игрок ставит ЛЮБУЮ сумму и
-// крутит; лента множителей прокручивается и тормозит на выпавшем — приз = ставка ×
-// множитель (0×..200×) с редкостью (цвет). Деньги авторитетны на сервере (provably-fair
-// commit+nonce, как в Костях): тап «Крутить» → один POST, сервер тянет приз и сразу
-// считает выплату. Этот экран — анимация ленты и показ результата.
+// крутит; лента множителей едет и тормозит на выпавшем — приз = ставка × множитель.
+// Исходы: либо «пусто» (ставка теряется), либо реальный икс (≥2×) — без частичных
+// возвратов. Деньги авторитетны на сервере (provably-fair commit+nonce, как в Костях).
 //
 // Анимация — НЕ lottie: лента это flex-строка карточек, едет одним transform:translateX
-// с ease-out (быстро→медленно). На каждый спин строим свежую ленту, выигрышная карта
-// стоит у конца (WIN_INDEX); сбрасываем transform в 0 без перехода, reflow, затем едем к
-// цели. Стоп результата — по transitionend трека (страховка — fallback-таймер).
+// с ease-out. На каждый спин строим свежую ленту, выигрышная карта стоит у конца
+// (WIN_INDEX); сбрасываем transform в 0 без перехода, reflow, едем к цели. Стоп — по
+// transitionend трека (страховка — fallback-таймер). Раскладка — как в Костях: сцена по
+// центру (заполняет экран), панель прижата к низу, клавиатурный clip-слой по rAF.
 
-const CARD_W = 76;   // px, ширина карточки
-const GAP = 8;       // px, зазор
+const CARD_W = 78;
+const GAP = 8;
 const STRIDE = CARD_W + GAP;
-const REEL_LEN = 64; // карточек в ленте
-const WIN_INDEX = 58; // позиция выигрышной карты (нужны карты после неё для «проезда»)
-const DUR_MS = 5400;  // длительность проезда
+const REEL_LEN = 64;
+const WIN_INDEX = 58;
+const DUR_MS = 5400;
 const FALLBACK_MS = DUR_MS + 500;
-// Визуальные веса наполнителя ленты (НЕ реальные шансы — те скрыты на сервере): чтобы в
-// ленте преобладали частые тиры, а редкие/золото мелькали для азарта. Порядок = порядок
-// тиров приза (low→high).
-const VIS_WEIGHTS = [30, 28, 24, 16, 9, 5, 3];
+// Визуальные веса наполнителя ленты (НЕ реальные шансы — те на сервере): лента яркая,
+// «пусто» мелькает редко, иксы преобладают. Порядок = тиры приза (low→high).
+const VIS_WEIGHTS = [14, 28, 26, 18, 9, 5];
 
-const TOP = "#1e1b4b";    // верх экрана = цвет плашки Telegram (глубокий индиго, совпадение шва)
+const TOP = "#1e1b4b"; // верх экрана = цвет плашки Telegram (глубокий индиго)
 const BG_BOTTOM = "#0a0d18";
 
 function haptic(style: "light" | "medium" | "heavy" | "rigid" | "soft") {
@@ -43,7 +43,6 @@ function hapticNotify(type: "error" | "success" | "warning") {
   } catch { /* нет поддержки */ }
 }
 
-// Нормализация ввода ставки (как в Ракете/Костях): запятая→точка, одна точка, «02»→«0.2».
 function normStake(raw: string): string {
   let s = raw.replace(",", ".").replace(/[^\d.]/g, "");
   const i = s.indexOf(".");
@@ -56,10 +55,8 @@ const PRESETS = [0.1, 1, 5, 25];
 type Rarity = CasePrize["rarity"];
 
 // Палитра редкостей. Классы — ЛИТЕРАЛАМИ (Tailwind JIT не видит собранные строкой).
-// from — верхний тинт градиента карты; glow — свечение рамки у редких; bar — полоска;
-// flash — цвет вспышки экрана на крупном выигрыше.
 const RARITY: Record<Rarity, { from: string; border: string; text: string; bar: string; glow: string; chip: string; flash: string }> = {
-  grey:   { from: "from-zinc-500/20",    border: "border-zinc-500/50",    text: "text-zinc-200",    bar: "bg-zinc-400",    glow: "",                                         chip: "bg-zinc-500/20 text-zinc-200",       flash: "rgba(161,161,170,0.0)" },
+  grey:   { from: "from-zinc-500/20",    border: "border-zinc-500/50",    text: "text-zinc-200",    bar: "bg-zinc-400",    glow: "",                                         chip: "bg-zinc-500/20 text-zinc-300",       flash: "rgba(161,161,170,0.0)" },
   blue:   { from: "from-sky-500/25",     border: "border-sky-400/70",     text: "text-sky-200",     bar: "bg-sky-400",     glow: "shadow-[0_0_14px_rgba(56,189,248,0.45)]",  chip: "bg-sky-500/20 text-sky-200",         flash: "rgba(56,189,248,0.35)" },
   purple: { from: "from-violet-500/30",  border: "border-violet-400/80",  text: "text-violet-100",  bar: "bg-violet-400",  glow: "shadow-[0_0_16px_rgba(167,139,250,0.5)]",  chip: "bg-violet-500/20 text-violet-200",   flash: "rgba(167,139,250,0.4)" },
   pink:   { from: "from-fuchsia-500/30", border: "border-fuchsia-400/80", text: "text-fuchsia-100", bar: "bg-fuchsia-400", glow: "shadow-[0_0_16px_rgba(232,121,249,0.5)]",  chip: "bg-fuchsia-500/20 text-fuchsia-200", flash: "rgba(232,121,249,0.45)" },
@@ -73,11 +70,23 @@ const multX = (milli: number) => {
   const x = milli / 1000;
   return (Number.isInteger(x) ? String(x) : x.toFixed(1)) + "×";
 };
+const tierLabel = (milli: number) => (milli === 0 ? "—" : multX(milli));
 
-// Карточка множителя в ленте: градиент-тинт + рамка/свечение по редкости, в центре «×N».
+// Карточка в ленте: «пусто» — тёмная с прочерком; икс — градиент-тинт + рамка/свечение
+// по редкости, в центре «×N».
 function ReelCard({ card, highlight }: { card: Card; highlight?: boolean }) {
   const r = RARITY[card.rarity];
   const miss = card.multMilli === 0;
+  if (miss) {
+    return (
+      <div
+        className="flex shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03]"
+        style={{ width: CARD_W, height: 92 }}
+      >
+        <span className="text-2xl font-black text-white/15">—</span>
+      </div>
+    );
+  }
   return (
     <div
       className={
@@ -87,28 +96,37 @@ function ReelCard({ card, highlight }: { card: Card; highlight?: boolean }) {
       style={{ width: CARD_W, height: 92, transition: "transform 150ms ease-out" }}
     >
       <span className={"absolute inset-x-0 top-0 h-1 rounded-t-xl " + r.bar} />
-      <span className={"text-[17px] font-black tabular-nums " + (miss ? "text-white/25" : r.text)}>{multX(card.multMilli)}</span>
+      <span className={"text-[18px] font-black tabular-nums " + r.text}>{multX(card.multMilli)}</span>
     </div>
   );
 }
 
-// Лёгкий слой искр на фоне (дешёвый, не lottie): десяток точек с мерцанием через
-// animate-pulse. Фикс. позиции → не пере-рандомятся на ре-рендере.
+// Арт кейса над лентой — светящийся бокс (gift-лотти) с пульсирующим ореолом. Заполняет
+// верх сцены и даёт фокус (чтобы экран не был пустым).
+const CaseArt = memo(function CaseArt() {
+  return (
+    <div className="relative grid place-items-center">
+      <div
+        className="pointer-events-none absolute h-36 w-36 rounded-full blur-2xl animate-pulse"
+        style={{ background: "radial-gradient(circle, rgba(251,191,36,0.35), rgba(167,139,250,0.20) 55%, transparent 72%)", animationDuration: "3s" }}
+      />
+      <Lottie src="/lottie/gift.json" className="relative h-24 w-24 drop-shadow-[0_6px_20px_rgba(167,139,250,0.4)]" />
+    </div>
+  );
+});
+
 const SPARKS = [
-  { l: 8, t: 16, s: 2, d: "0s" }, { l: 22, t: 40, s: 1, d: "0.6s" }, { l: 35, t: 10, s: 1, d: "1.2s" },
-  { l: 48, t: 30, s: 2, d: "0.3s" }, { l: 63, t: 14, s: 1, d: "0.9s" }, { l: 78, t: 36, s: 2, d: "1.5s" },
-  { l: 90, t: 20, s: 1, d: "0.4s" }, { l: 15, t: 58, s: 1, d: "1.1s" }, { l: 70, t: 54, s: 1, d: "0.7s" },
-  { l: 85, t: 62, s: 2, d: "0.2s" }, { l: 30, t: 66, s: 1, d: "1.4s" }, { l: 55, t: 60, s: 1, d: "0.8s" },
+  { l: 8, t: 14, s: 2, d: "0s" }, { l: 22, t: 34, s: 1, d: "0.6s" }, { l: 35, t: 9, s: 1, d: "1.2s" },
+  { l: 48, t: 26, s: 2, d: "0.3s" }, { l: 63, t: 12, s: 1, d: "0.9s" }, { l: 78, t: 30, s: 2, d: "1.5s" },
+  { l: 90, t: 18, s: 1, d: "0.4s" }, { l: 14, t: 70, s: 1, d: "1.1s" }, { l: 72, t: 66, s: 1, d: "0.7s" },
+  { l: 86, t: 74, s: 2, d: "0.2s" }, { l: 30, t: 78, s: 1, d: "1.4s" }, { l: 55, t: 72, s: 1, d: "0.8s" },
 ];
 const Sparkles = memo(function Sparkles() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
       {SPARKS.map((s, i) => (
-        <span
-          key={i}
-          className="absolute rounded-full bg-white/60 animate-pulse"
-          style={{ left: `${s.l}%`, top: `${s.t}%`, width: s.s, height: s.s, animationDelay: s.d, animationDuration: "2.4s" }}
-        />
+        <span key={i} className="absolute rounded-full bg-white/60 animate-pulse"
+          style={{ left: `${s.l}%`, top: `${s.t}%`, width: s.s, height: s.s, animationDelay: s.d, animationDuration: "2.4s" }} />
       ))}
     </div>
   );
@@ -126,7 +144,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<{ rarity: Rarity; multMilli: number; payout: number } | null>(null);
   const [recent, setRecent] = useState<CaseSpinRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
-  const [flash, setFlash] = useState<string | null>(null); // цвет вспышки на крупном выигрыше
+  const [flash, setFlash] = useState<string | null>(null);
 
   const clipRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -139,9 +157,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
   const minNano = st?.min_stake_nano ?? 100_000_000;
 
   // Клавиатура: ужимаем ВНУТРЕННИЙ clip-слой по rAF (корень стабильно-тёмный во весь
-  // экран). Точь-в-точь приём Ракеты/Костей — в Telegram/iOS события клавиатуры приходят
-  // с пропусками, поэтому синхроним каждый кадр; в расфокусе высота = innerHeight, чтобы
-  // не оголялся фон вкладки под уезжающей клавиатурой.
+  // экран). Точь-в-точь приём Костей/Ракеты.
   useEffect(() => {
     const vv = window.visualViewport;
     const el = clipRef.current;
@@ -167,7 +183,6 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
     fetchMe().then((m) => setBalanceNano(m.balance_nano)).catch(() => {});
   }, []);
 
-  // Наполнитель ленты: случайный тир по визуальным весам (только для вида).
   const randomCard = useCallback((prizes: CasePrize[]): Card => {
     const w = prizes.map((_, i) => VIS_WEIGHTS[i] ?? 1);
     const total = w.reduce((a, b) => a + b, 0);
@@ -191,7 +206,6 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
       .catch(() => {});
   }, [reloadBalance, randomCard]);
 
-  // Нативная кнопка «Назад».
   useEffect(() => {
     const bb = (window.Telegram?.WebApp as { BackButton?: { show?: () => void; hide?: () => void; onClick?: (cb: () => void) => void; offClick?: (cb: () => void) => void } } | undefined)?.BackButton;
     if (!bb) return;
@@ -200,8 +214,6 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
     return () => { bb.offClick?.(onClose); bb.hide?.(); };
   }, [onClose]);
 
-  // Плашка/фон Telegram — тёмные (гасим голубой фон вкладки под клавой), возвращаем
-  // голубой при выходе.
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
     const dark = () => { try { tg?.setHeaderColor?.(TOP); tg?.setBackgroundColor?.(BG_BOTTOM); } catch { /* старый клиент */ } };
@@ -223,7 +235,6 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
 
   useEffect(() => () => { window.clearTimeout(fallbackRef.current); window.clearTimeout(flashTimer.current); }, []);
 
-  // Завершение проезда: показываем приз, баланс, историю, вспышку на профите.
   const finalize = useCallback(() => {
     if (settledRef.current) return;
     settledRef.current = true;
@@ -233,9 +244,9 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
     setBalanceNano(res.balance_nano);
     setResult({ rarity: res.rarity, multMilli: res.mult_milli, payout: res.payout_nano });
     setSpinning(false);
-    const profit = res.mult_milli > 1000;
-    hapticNotify(res.payout_nano > 0 ? "success" : "error");
-    if (profit) {
+    const win = res.payout_nano > 0;
+    hapticNotify(win ? "success" : "error");
+    if (win) {
       haptic("rigid");
       setFlash(RARITY[res.rarity].flash);
       window.clearTimeout(flashTimer.current);
@@ -248,9 +259,6 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
     }, ...prev].slice(0, 20));
   }, []);
 
-  // Императивный проезд ленты: после рендера новой ленты (spinSeq) сбрасываем трек в 0
-  // без перехода, reflow, едем к цели с ease-out. Цель = центр вьюпорта под выигрышной
-  // картой (+ небольшой джиттер).
   useLayoutEffect(() => {
     if (spinSeq === 0 || !spinning) return;
     const track = trackRef.current, vp = viewportRef.current;
@@ -261,7 +269,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
 
     track.style.transition = "none";
     track.style.transform = "translateX(0px)";
-    void track.offsetWidth; // reflow → старт с нуля
+    void track.offsetWidth;
     track.style.transition = `transform ${DUR_MS}ms cubic-bezier(0.10, 0.82, 0.16, 1)`;
     track.style.transform = `translateX(${target}px)`;
 
@@ -307,14 +315,14 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed left-0 top-0 z-50 w-full overflow-hidden text-white" style={{ height: "var(--app-h, 100dvh)", background: BG_BOTTOM }}>
       <div ref={clipRef} className="absolute inset-x-0 top-0 overflow-hidden" style={{ height: "var(--app-h, 100dvh)" }}>
-        {/* Фон: глубокий индиго-градиент + искры */}
+        {/* Фон: индиго-градиент + искры */}
         <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(180deg, ${TOP} 0%, #16142e 42%, ${BG_BOTTOM} 100%)` }} />
         <Sparkles />
 
-        {/* Вспышка на крупном выигрыше (радиальная, гаснет) */}
+        {/* Вспышка на выигрыше */}
         <div
           className="pointer-events-none absolute inset-0 z-40 transition-opacity duration-700"
-          style={{ background: flash ? `radial-gradient(60% 50% at 50% 38%, ${flash}, transparent 70%)` : "transparent", opacity: flash ? 1 : 0 }}
+          style={{ background: flash ? `radial-gradient(60% 50% at 50% 42%, ${flash}, transparent 70%)` : "transparent", opacity: flash ? 1 : 0 }}
         />
 
         <div className="relative z-10 flex h-full flex-col overflow-hidden">
@@ -325,26 +333,33 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
               {recent.length === 0 && <span className="text-xs text-white/30">{t("case.noSpins")}</span>}
               {recent.map((r) => (
                 <span key={r.id} className={"flex shrink-0 items-center rounded-md px-1.5 py-1 text-xs font-bold tabular-nums " + RARITY[r.rarity].chip}>
-                  {multX(r.mult_milli)}
+                  {tierLabel(r.mult_milli)}
                 </span>
               ))}
             </div>
           </div>
 
-          {/* Сцена: лента + указатель (ЯКОРЬ к верху — не зависит от высоты экрана, поэтому
-              не «всплывает» при входе) */}
-          <div className="relative mt-3">
-            {/* спотлайт за лентой */}
-            <div className="pointer-events-none absolute inset-x-0 top-1/2 z-0 h-48 -translate-y-1/2" style={{ background: "radial-gradient(50% 70% at 50% 50%, rgba(167,139,250,0.22), transparent 72%)" }} />
-            <div ref={viewportRef} className="relative z-10 w-full overflow-hidden" style={{ height: 116 }}>
-              <div className="pointer-events-none absolute inset-y-0 left-0 z-20 w-14 bg-gradient-to-r from-[#0c0a22] to-transparent" />
-              <div className="pointer-events-none absolute inset-y-0 right-0 z-20 w-14 bg-gradient-to-l from-[#0c0a22] to-transparent" />
+          {/* Сцена по центру: арт кейса + лента + результат (заполняет экран, держится
+              стабильно — clip-слой синхронит высоту, как в Костях). */}
+          <div className="flex flex-1 flex-col items-center justify-center overflow-hidden">
+            <CaseArt />
+
+            {/* Лента-«окно» в рамке */}
+            <div
+              ref={viewportRef}
+              className="relative mx-3 my-6 w-[calc(100%-1.5rem)] overflow-hidden rounded-2xl bg-black/30 ring-1 ring-white/10"
+              style={{ height: 116, boxShadow: "inset 0 0 30px rgba(0,0,0,0.5)" }}
+            >
+              {/* спотлайт за лентой */}
+              <div className="pointer-events-none absolute inset-0 z-0" style={{ background: "radial-gradient(60% 80% at 50% 50%, rgba(167,139,250,0.18), transparent 72%)" }} />
+              <div className="pointer-events-none absolute inset-y-0 left-0 z-20 w-12 bg-gradient-to-r from-black/60 to-transparent" />
+              <div className="pointer-events-none absolute inset-y-0 right-0 z-20 w-12 bg-gradient-to-l from-black/60 to-transparent" />
               {/* центральный неон-указатель */}
               <div className="pointer-events-none absolute inset-y-1 left-1/2 z-30 -ml-px w-0.5 bg-amber-300 shadow-[0_0_14px_3px_rgba(252,211,77,0.7)]" />
               <div className="pointer-events-none absolute left-1/2 top-0 z-30 -ml-2 h-0 w-0 border-x-8 border-t-[9px] border-x-transparent border-t-amber-300" />
               <div className="pointer-events-none absolute bottom-0 left-1/2 z-30 -ml-2 h-0 w-0 border-x-8 border-b-[9px] border-x-transparent border-b-amber-300" />
               {/* трек */}
-              <div ref={trackRef} className="absolute top-1/2 left-0 flex -translate-y-1/2 will-change-transform" style={{ gap: GAP }}>
+              <div ref={trackRef} className="absolute top-1/2 left-0 z-10 flex -translate-y-1/2 will-change-transform" style={{ gap: GAP }}>
                 {reel.map((c, i) => (
                   <ReelCard key={`${spinSeq}-${i}`} card={c} highlight={!spinning && i === WIN_INDEX} />
                 ))}
@@ -352,7 +367,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
             </div>
 
             {/* Результат */}
-            <div className="pointer-events-none mt-3 flex h-16 flex-col items-center justify-center">
+            <div className="pointer-events-none flex h-14 flex-col items-center justify-center">
               {!spinning && result ? (
                 result.payout > 0 ? (
                   <>
@@ -360,7 +375,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
                       <TonIcon size={26} />+{fmtTon(result.payout / 1e9)}
                     </div>
                     <div className={"mt-1 text-sm font-bold " + RARITY[result.rarity].text}>
-                      {result.multMilli > 1000 ? t("case.youWon") + " · " : ""}{multX(result.multMilli)}
+                      {t("case.youWon")} · {multX(result.multMilli)}
                     </div>
                   </>
                 ) : (
@@ -372,21 +387,17 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          {/* распорка — растёт при изменении высоты Telegram, держит панель внизу, а ленту
-              сверху на месте */}
-          <div className="flex-1" />
-
           {/* Нижняя панель */}
           <div className="border-t border-white/10 bg-[#0c0a1c] px-4 pb-3 pt-3">
             {err && <p className="mb-2 text-center text-xs text-rose-400">{err}</p>}
 
-            {/* Что внутри — множители по редкости */}
+            {/* Что внутри */}
             <div className="mb-2.5">
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/40">{t("case.contents")}</div>
               <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {(st?.prizes ?? []).map((p, i) => (
                   <span key={i} className={"flex shrink-0 items-center rounded-lg px-2 py-1 text-xs font-bold tabular-nums " + RARITY[p.rarity].chip}>
-                    {multX(p.mult_milli)}
+                    {tierLabel(p.mult_milli)}
                   </span>
                 ))}
               </div>
@@ -434,7 +445,6 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
               {pending || spinning ? t("case.opening") : `${t("case.open")} · ${fmtTon(Number(stake) || 0)} TON`}
             </button>
 
-            {/* Честная игра: commitment-хэш + nonce */}
             <div className="mt-2 truncate text-center text-[10px] text-white/25">
               {t("case.fair")} · {st?.server_seed_hash ? `🔒 ${st.server_seed_hash.slice(0, 16)}…` : ""} · #{st?.nonce ?? 0}
             </div>
