@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dice flow test</title>
+  <script src="https://unpkg.com/lottie-web@5.12.2/build/player/lottie.min.js"></script>
+  <style>
+    body { margin:0; background:#0a0d18; color:#cfd6e6; font-family:system-ui,sans-serif; text-align:center; }
+    .box { width:200px; height:200px; margin:24px auto 8px; }
+    #status { font-size:16px; font-weight:700; }
+    .ok { color:#34d399; }
+  </style>
+</head>
+<body>
+  <h3>dice-3, loop=false, autoplay — поведение как в игре</h3>
+  <div class="box" id="box"></div>
+  <div id="status">playing…</div>
+  <script>
+    const anim = lottie.loadAnimation({
+      container: document.getElementById("box"), renderer: "svg",
+      loop: false, autoplay: true, path: "/lottie/dice-3.json",
+    });
+    let started = Date.now();
+    anim.addEventListener("complete", () => {
+      const s = document.getElementById("status");
+      s.className = "ok";
+      s.textContent = "COMPLETE fired @ " + ((Date.now()-started)/1000).toFixed(2)
+        + "s · last frame " + Math.round(anim.currentFrame) + "/" + Math.round(anim.totalFrames)
+        + " · still on screen (frozen)";
+    });
+  </script>
+</body>
+</html>
