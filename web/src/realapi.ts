@@ -346,6 +346,83 @@ export async function caseRotate(clientSeed?: string): Promise<{
   return await r.json();
 }
 
+// ── Basketball (instant shot game) ────────────────────────────────────────
+
+export type BasketThrowRow = {
+  id: number;
+  nonce: number;
+  stake_nano: number;
+  roll: number;
+  hit: boolean;
+  mult_milli: number;
+  payout_nano: number;
+  created_at: string;
+};
+
+export type BasketState = {
+  server_seed_hash: string;
+  client_seed: string;
+  nonce: number;
+  hit_prob_bp: number; // score chance (5000 = 50%)
+  edge_bp: number;
+  mult_milli: number; // win multiplier ×1000
+  min_stake_nano: number;
+  max_stake_nano: number;
+  recent: BasketThrowRow[];
+};
+
+export type BasketThrowResult = {
+  throw_id: number;
+  nonce: number;
+  roll: number;
+  hit: boolean;
+  mult_milli: number;
+  stake_nano: number;
+  payout_nano: number;
+  balance_nano: number;
+  server_seed_hash: string;
+};
+
+// fetchBasketState returns the fairness commitment, the economics (chance/edge/multiplier),
+// stake bounds and recent throws. Creates the seed on first call.
+export async function fetchBasketState(): Promise<BasketState> {
+  const r = await fetch(`${API_BASE}/api/basket/state`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`basket state ${r.status}`);
+  return (await r.json()) as BasketState;
+}
+
+// basketThrow plays one instant shot at the chosen stake. Returns the outcome (hit/miss)
+// and the new balance. Throws with the server message.
+export async function basketThrow(stakeNano: number): Promise<BasketThrowResult> {
+  const r = await fetch(`${API_BASE}/api/basket/throw`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ stake_nano: stakeNano }),
+  });
+  if (!r.ok) {
+    const e = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(e.error || `basket throw ${r.status}`);
+  }
+  return (await r.json()) as BasketThrowResult;
+}
+
+// basketRotate reveals the current server seed and commits a fresh one.
+export async function basketRotate(clientSeed?: string): Promise<{
+  old_server_seed: string;
+  old_server_hash: string;
+  thrown_nonce: number;
+  server_seed_hash: string;
+  client_seed: string;
+}> {
+  const r = await fetch(`${API_BASE}/api/basket/rotate`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ client_seed: clientSeed ?? "" }),
+  });
+  if (!r.ok) throw new Error(`basket rotate ${r.status}`);
+  return await r.json();
+}
+
 // fetchMyBets returns the user's bets (newest first), with market + outcome titles.
 export async function fetchMyBets(): Promise<Bet[]> {
   const r = await fetch(`${API_BASE}/api/bets`, { headers: authHeaders() });

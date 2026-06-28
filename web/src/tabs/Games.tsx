@@ -4,6 +4,7 @@ import Lottie from "../components/Lottie";
 import RocketGame from "./RocketGame";
 import DiceGame from "./DiceGame";
 import CaseGame from "./CaseGame";
+import BasketGame from "./BasketGame";
 
 // Экран «Игры» — казино-раздел. Полностью голубой фон (см. App: blueTab+fullBlue),
 // по нему рандомно падают эмодзи из паков (лягушка/гем/тыква/кот). Карточки —
@@ -41,6 +42,14 @@ const GAMES: Game[] = [
     descKey: "games.caseDesc",
     icon: <Lottie src="/lottie/gift.json" className="h-full w-full" />,
     tint: "bg-gradient-to-br from-[#8b5cf6] to-[#d946ef] shadow-fuchsia-600/40",
+    ready: true,
+  },
+  {
+    id: "basket",
+    titleKey: "games.basketTitle",
+    descKey: "games.basketDesc",
+    icon: <Lottie src="/lottie/basket-hit-1.json" className="h-full w-full" />,
+    tint: "bg-gradient-to-br from-[#fb923c] to-[#c2410c] shadow-orange-700/40",
     ready: true,
   },
 ];
@@ -124,6 +133,7 @@ export default function Games({ onGameOpenChange }: { onGameOpenChange?: (open: 
   if (open === "rocket") return <RocketGame onClose={() => setOpen(null)} />;
   if (open === "dice") return <DiceGame onClose={() => setOpen(null)} />;
   if (open === "case") return <CaseGame onClose={() => setOpen(null)} />;
+  if (open === "basket") return <BasketGame onClose={() => setOpen(null)} />;
   return (
     <div className="relative min-h-[100dvh]">
       <FallingEmoji />
