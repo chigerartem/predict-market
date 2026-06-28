@@ -37,6 +37,11 @@ services:
       ALLOW_INSECURE_INITDATA: ${ALLOW_INSECURE_INITDATA:-}
       TG_WEBHOOK_URL: ${TG_WEBHOOK_URL:-}
       TG_WEBHOOK_SECRET: ${TG_WEBHOOK_SECRET:-}
+      # House TON deposit address (public). Watcher credits inbound transfers by memo.
+      TON_DEPOSIT_ADDRESS: UQBxEJzz42X8qS98gQf02v0pEw4W-E273sDxOAYkLYL5uW8L
+      TONCENTER_API_KEY: ${TONCENTER_API_KEY:-}
+      # Test-phase: one-time bonus (nano-TON) per user on first open. 0 = off.
+      SIGNUP_BONUS_NANO: ${SIGNUP_BONUS_NANO:-0}
     depends_on:
       db:
         condition: service_healthy
