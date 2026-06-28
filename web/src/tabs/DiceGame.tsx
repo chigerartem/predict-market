@@ -355,9 +355,19 @@ export default function DiceGame({ onClose }: { onClose: () => void }) {
                 {[0, 1].map((i) => (
                   <div key={i} className="grid h-32 w-32 place-items-center">
                     {phase === "idle" ? (
-                      // Покой ДО первого броска: СТАТИЧНАЯ грань (SVG, без lottie) — стоит
-                      // с первого кадра, ничего не грузится, не мелькает, не меняется.
-                      <PipDie n={dice[i]} size={116} className="!rounded-[18px] shadow-lg shadow-black/40" />
+                      // Покой ДО первого броска: НАШ lottie-кубик стоит на ГРАНИ
+                      // (autoplay=false, freeze=last → последний кадр), НЕ анимируется.
+                      // Обёртка прячет контейнер, пока не встанет последний кадр → кадр 0
+                      // («в полёте») не мелькает. Грань при входе не меняем (setDice по
+                      // recent убран) → lottie не перезагружается, кубик просто стоит.
+                      <Lottie
+                        key={`idle-${dice[i]}-${i}`}
+                        src={`/lottie/dice-${dice[i]}.json`}
+                        className="h-32 w-32"
+                        loop={false}
+                        autoplay={false}
+                        freeze="last"
+                      />
                     ) : (
                       // Бросок и покой после него — ОДНА анимация (loop=false: доиграв,
                       // застывает на выпавшей грани). key=rollSeq → новый бросок ремаунтит
