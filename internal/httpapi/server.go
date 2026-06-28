@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"predict/internal/betting"
+	"predict/internal/casegame"
 	"predict/internal/deposits"
 	"predict/internal/dice"
 	"predict/internal/ledger"
@@ -40,6 +41,7 @@ type Server struct {
 	withdrawSender  withdrawals.Sender // house hot wallet for TON payouts; nil → withdrawals disabled
 	rocket          *rocket.Engine     // crash game engine; nil → rocket endpoints disabled
 	dice            *dice.Store        // dice game; nil → dice endpoints disabled
+	caseStore       *casegame.Store    // case-opening game; nil → case endpoints disabled
 	signupBonusNano int64              // one-time test bonus per user on first /api/me; 0 → off
 }
 
@@ -69,6 +71,9 @@ func (s *Server) SetRocket(e *rocket.Engine) { s.rocket = e }
 // SetDice wires the dice-game store. nil disables the dice endpoints (503).
 func (s *Server) SetDice(d *dice.Store) { s.dice = d }
 
+// SetCase wires the case-opening game store. nil disables the case endpoints (503).
+func (s *Server) SetCase(c *casegame.Store) { s.caseStore = c }
+
 // SetSignupBonus sets the one-time test bonus (nano-TON) each user is credited on
 // first /api/me. 0 disables it. Test-phase only (withdrawals are off).
 func (s *Server) SetSignupBonus(nano int64) { s.signupBonusNano = nano }
@@ -92,6 +97,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/dice/state", s.auth(s.handleDiceState))
 	mux.HandleFunc("POST /api/dice/roll", s.auth(s.handleDiceRoll))
 	mux.HandleFunc("POST /api/dice/rotate", s.auth(s.handleDiceRotate))
+	mux.HandleFunc("GET /api/case/state", s.auth(s.handleCaseState))
+	mux.HandleFunc("POST /api/case/open", s.auth(s.handleCaseOpen))
+	mux.HandleFunc("POST /api/case/rotate", s.auth(s.handleCaseRotate))
 	mux.HandleFunc("POST /api/tg/webhook", s.handleTgWebhook)
 	return s.cors(mux)
 }
@@ -593,6 +601,88 @@ func (s *Server) handleDiceRotate(w http.ResponseWriter, r *http.Request, userID
 	})
 }
 
+// handleCaseState returns the player's fairness commitment (seed hash, client seed,
+// nonce), the spin price, the prize table (rarity + multiplier; weights stay hidden),
+// and recent spins.
+func (s *Server) handleCaseState(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.caseStore == nil {
+		writeErr(w, http.StatusServiceUnavailable, "case unavailable")
+		return
+	}
+	st, err := s.caseStore.State(r.Context(), userID)
+	if err != nil {
+		log.Printf("case state user %d: %v", userID, err)
+		writeErr(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, caseStateDTO{
+		ServerSeedHash: st.ServerSeedHash,
+		ClientSeed:     st.ClientSeed,
+		Nonce:          st.Nonce,
+		PriceNano:      st.PriceNano,
+		Prizes:         st.Prizes,
+		Recent:         st.Recent,
+	})
+}
+
+// handleCaseOpen plays one instant case open: locks the price, draws a prize, settles.
+func (s *Server) handleCaseOpen(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.caseStore == nil {
+		writeErr(w, http.StatusServiceUnavailable, "case unavailable")
+		return
+	}
+	res, err := s.caseStore.Open(r.Context(), userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, casegame.ErrInsufficient):
+			writeErr(w, http.StatusBadRequest, "insufficient balance")
+		case errors.Is(err, casegame.ErrHouseCantCover):
+			writeErr(w, http.StatusBadRequest, "house can't cover payout")
+		default:
+			log.Printf("case open user %d: %v", userID, err)
+			writeErr(w, http.StatusInternalServerError, "server error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, caseSpinDTO{
+		SpinID:         res.SpinID,
+		Nonce:          res.Nonce,
+		PrizeIndex:     res.PrizeIndex,
+		Rarity:         res.Rarity,
+		MultMilli:      res.MultMilli,
+		PriceNano:      res.PriceNano,
+		PayoutNano:     res.PayoutNano,
+		BalanceNano:    res.BalanceNano,
+		ServerSeedHash: res.ServerSeedHash,
+	})
+}
+
+// handleCaseRotate reveals the player's current server seed and commits a fresh one
+// (resetting the nonce), so they can verify all spins drawn under the old seed.
+func (s *Server) handleCaseRotate(w http.ResponseWriter, r *http.Request, userID int64) {
+	if s.caseStore == nil {
+		writeErr(w, http.StatusServiceUnavailable, "case unavailable")
+		return
+	}
+	var req struct {
+		ClientSeed string `json:"client_seed"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req) // body optional
+	rot, err := s.caseStore.RotateSeed(r.Context(), userID, req.ClientSeed)
+	if err != nil {
+		log.Printf("case rotate user %d: %v", userID, err)
+		writeErr(w, http.StatusInternalServerError, "server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"old_server_seed":  rot.OldServerSeed,
+		"old_server_hash":  rot.OldServerHash,
+		"spun_nonce":       rot.SpunNonce,
+		"server_seed_hash": rot.NewServerHash,
+		"client_seed":      rot.NewClientSeed,
+	})
+}
+
 // RegisterWebhook stores the secret used to authenticate incoming webhook calls
 // and (if url is non-empty) registers it with Telegram. No-op without a bot token.
 func (s *Server) RegisterWebhook(ctx context.Context, url, secret string) error {
@@ -717,6 +807,27 @@ type diceRollDTO struct {
 	Sum            int    `json:"sum"`
 	Won            bool   `json:"won"`
 	MultMilli      int64  `json:"mult_milli"`
+	PayoutNano     int64  `json:"payout_nano"`
+	BalanceNano    int64  `json:"balance_nano"`
+	ServerSeedHash string `json:"server_seed_hash"`
+}
+
+type caseStateDTO struct {
+	ServerSeedHash string             `json:"server_seed_hash"`
+	ClientSeed     string             `json:"client_seed"`
+	Nonce          int64              `json:"nonce"`
+	PriceNano      int64              `json:"price_nano"`
+	Prizes         []casegame.Prize   `json:"prizes"` // order = reel tiers; weights hidden
+	Recent         []casegame.SpinRow `json:"recent"`
+}
+
+type caseSpinDTO struct {
+	SpinID         int64  `json:"spin_id"`
+	Nonce          int64  `json:"nonce"`
+	PrizeIndex     int    `json:"prize_index"`
+	Rarity         string `json:"rarity"`
+	MultMilli      int64  `json:"mult_milli"`
+	PriceNano      int64  `json:"price_nano"`
 	PayoutNano     int64  `json:"payout_nano"`
 	BalanceNano    int64  `json:"balance_nano"`
 	ServerSeedHash string `json:"server_seed_hash"`

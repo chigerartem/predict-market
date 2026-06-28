@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"predict/internal/casegame"
 	"predict/internal/db"
 	"predict/internal/deposits"
 	"predict/internal/dice"
@@ -160,6 +161,23 @@ func main() {
 		} else {
 			srv.SetDice(store)
 			log.Printf("dice enabled (edge %dbp)", cfg.EdgeBp)
+		}
+	}
+
+	// Cases: instant single-player case-opening game (CS:GO-style). Reuses the ledger;
+	// the rare big payouts (up to 200×) are covered by HOUSE_TREASURY, which is allowed
+	// to go negative (migration 0014) — the operator tops up the float.
+	if envBool("CASE_ENABLED", true) {
+		cfg := casegame.DefaultConfig()
+		if v := envInt("CASE_PRICE_NANO", 0); v > 0 {
+			cfg.PriceNano = v
+		}
+		store, err := casegame.NewStore(ctx, pool, cfg)
+		if err != nil {
+			log.Printf("case disabled: %v", err)
+		} else {
+			srv.SetCase(store)
+			log.Printf("case enabled (price %d nano)", cfg.PriceNano)
 		}
 	}
 
