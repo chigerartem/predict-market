@@ -157,13 +157,15 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
   const minNano = st?.min_stake_nano ?? 100_000_000;
 
   // Клавиатура: ужимаем ВНУТРЕННИЙ clip-слой по rAF (корень стабильно-тёмный во весь
-  // экран). Точь-в-точь приём Костей/Ракеты.
-  useEffect(() => {
+  // экран). ПЕРВЫЙ sync — синхронно до первого paint (useLayoutEffect), иначе первый
+  // кадр по инлайновой --app-h, а следующий по innerHeight → экран «доводится на место»
+  // при входе из Games. Дальше rAF держит синхрон под клавиатуру (приём Костей/Ракеты).
+  useLayoutEffect(() => {
     const vv = window.visualViewport;
     const el = clipRef.current;
     if (!vv || !el) return;
     let raf = 0, lastH = -1, lastT = -1;
-    const loop = () => {
+    const sync = () => {
       const ae = document.activeElement as HTMLElement | null;
       const focused = !!ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA");
       const h = focused ? Math.round(vv.height) : Math.round(window.innerHeight);
@@ -173,8 +175,9 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
         el.style.transform = tY ? `translateY(${tY}px)` : "";
         lastH = h; lastT = tY;
       }
-      raf = requestAnimationFrame(loop);
     };
+    sync(); // синхронно до первого paint
+    const loop = () => { sync(); raf = requestAnimationFrame(loop); };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, []);

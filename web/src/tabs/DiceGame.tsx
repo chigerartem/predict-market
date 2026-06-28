@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fetchMe, fetchDiceState, diceRoll, type DiceState, type DiceRollRow, type DiceRollResult } from "../realapi";
 import { fmtTon } from "../format";
 import { useT } from "../i18n";
@@ -133,14 +133,16 @@ export default function DiceGame({ onClose }: { onClose: () => void }) {
   // экран). Точь-в-точь приём Ракеты — в Telegram/iOS события клавиатуры приходят с
   // пропусками, поэтому синхроним каждый кадр; в расфокусе высота = innerHeight, чтобы
   // не оголялся голубой фон вкладки под уезжающей клавиатурой.
-  useEffect(() => {
+  // useLayoutEffect + ПЕРВЫЙ sync вне rAF → высота выставляется до первого paint. Иначе
+  // первый кадр рисуется по инлайновой --app-h (viewportStableHeight), а следующий — по
+  // window.innerHeight, и при входе из Games экран заметно «доводится на место». Дальше
+  // rAF держит синхрон под клавиатуру.
+  useLayoutEffect(() => {
     const vv = window.visualViewport;
     const el = clipRef.current;
     if (!vv || !el) return;
-    let raf = 0;
-    let lastH = -1;
-    let lastT = -1;
-    const loop = () => {
+    let raf = 0, lastH = -1, lastT = -1;
+    const sync = () => {
       const ae = document.activeElement as HTMLElement | null;
       const focused = !!ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA");
       const h = focused ? Math.round(vv.height) : Math.round(window.innerHeight);
@@ -151,8 +153,9 @@ export default function DiceGame({ onClose }: { onClose: () => void }) {
         lastH = h;
         lastT = tY;
       }
-      raf = requestAnimationFrame(loop);
     };
+    sync(); // синхронно до первого paint
+    const loop = () => { sync(); raf = requestAnimationFrame(loop); };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, []);

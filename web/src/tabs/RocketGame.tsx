@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { fetchMe, rocketBet, rocketCashout, rocketStreamUrl, type RocketState } from "../realapi";
 import { fmtTon } from "../format";
 import { useT } from "../i18n";
@@ -160,14 +160,15 @@ export default function RocketGame({ onClose }: { onClose: () => void }) {
   // клавиатура открывала уже полноразмерную игру, а не растущую снизу. В фокусе → vv.height
   // (над клавой) + сдвиг на vv.offsetTop. На iOS vv.height после закрытия залипает
   // уменьшенным — поэтому в расфокусе берём именно innerHeight.
-  useEffect(() => {
+  // ПЕРВЫЙ sync — синхронно до первого paint (useLayoutEffect), иначе первый кадр
+  // рисуется по инлайновой --app-h, а следующий по innerHeight → экран «доводится на
+  // место» при входе из Games. Дальше rAF держит синхрон под клавиатуру.
+  useLayoutEffect(() => {
     const vv = window.visualViewport;
     const el = clipRef.current;
     if (!vv || !el) return;
-    let raf = 0;
-    let lastH = -1;
-    let lastT = -1;
-    const loop = () => {
+    let raf = 0, lastH = -1, lastT = -1;
+    const sync = () => {
       const ae = document.activeElement as HTMLElement | null;
       const focused = !!ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA");
       const h = focused ? Math.round(vv.height) : Math.round(window.innerHeight);
@@ -178,8 +179,9 @@ export default function RocketGame({ onClose }: { onClose: () => void }) {
         lastH = h;
         lastT = tY;
       }
-      raf = requestAnimationFrame(loop);
     };
+    sync(); // синхронно до первого paint
+    const loop = () => { sync(); raf = requestAnimationFrame(loop); };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, []);
