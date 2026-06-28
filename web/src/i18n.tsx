@@ -1,38 +1,10 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+// ── Лёгкий собственный i18n (EN-only, без зависимостей) ──────────────────────
+// Язык приложения — только английский (локализации и переключателя нет намеренно).
+// Ключи плоские, с namespace через точку: t("bet.title"). Интерполяция через
+// {placeholder}: t("wd.min", { min }). useT() возвращает статическую функцию перевода
+// (без контекста/провайдера — словарь один, ре-рендерить на смену языка нечего).
 
-// ── Лёгкий собственный i18n (без зависимостей) ───────────────────────────────
-// Английский — язык по умолчанию по всему Mini App; пользователь может переключить
-// на русский в профиле. Выбор хранится в localStorage (клиентский источник правды,
-// бэкенд не участвует). Ключи плоские, с namespace через точку: t("home.greeting").
-// Интерполяция через {placeholder}: t("home.disconnectConfirm", { name }).
-//
-// Парность словарей EN/RU гарантируется типами: ru объявлен как Record<Key, string>,
-// где Key = ключи en, поэтому пропуск/опечатка ключа = ошибка компиляции.
-
-export type Lang = "en" | "ru";
-
-const LS_KEY = "kopix_lang_v1";
-
-// Английский по умолчанию. Telegram language_code НЕ используем намеренно —
-// дефолт всегда EN, пока пользователь явно не выберет русский в профиле.
-function initialLang(): Lang {
-  try {
-    const v = localStorage.getItem(LS_KEY);
-    if (v === "en" || v === "ru") return v;
-  } catch {
-    /* localStorage недоступен — дефолт EN */
-  }
-  return "en";
-}
-
-const en = {
+const dict = {
   // ── Навигация (App) ────────────────────────────────────────────────────
   "nav.home": "Home",
   "nav.bets": "Bets",
@@ -70,16 +42,14 @@ const en = {
   "home.noEvents": "No open events yet",
   "home.search": "Find an event",
   "home.noResults": "Nothing found",
+  "home.alreadyBet": "Bet placed",
 
   "dep.title": "Top up balance",
   "dep.subtitle": "Choose how to deposit",
-  "dep.gifts": "Telegram Gifts",
-  "dep.giftsDesc": "Send a gift to the bot — we value it and credit TON",
   "dep.ton": "TON",
   "dep.tonDesc": "Top up from any TON wallet",
   "dep.stars": "Telegram Stars",
   "dep.starsDesc": "Pay with Stars",
-  "dep.gettingReady": "We're finishing this method — it goes live soon.",
   "dep.starsAmount": "Amount in Stars",
   "dep.pay": "Pay",
   "dep.processing": "Creating invoice…",
@@ -101,9 +71,11 @@ const en = {
   "wd.subtitle": "Choose how to withdraw",
   "wd.methTon": "TON",
   "wd.methTonDesc": "Send to any TON wallet",
-  "wd.methGifts": "Telegram Gift",
-  "wd.methGiftsDesc": "Swap your TON for a gift you pick",
-  "wd.comingSoon": "We're finishing this method — it goes live soon.",
+  "wd.methStars": "Telegram Stars",
+  "wd.methStarsDesc": "Manual payout — message the admin",
+  "wd.starsTitle": "Withdraw in Stars",
+  "wd.starsText": "Stars payouts are handled manually. Tap below to message us — we'll send your Stars.",
+  "wd.starsContact": "Message @LinkerFlugel",
   "wd.available": "Available",
   "wd.amount": "Amount",
   "wd.max": "Max",
@@ -128,17 +100,13 @@ const en = {
   "bet.placing": "Placing…",
   "bet.success": "Bet placed!",
   "bet.error": "Couldn't place the bet",
+  "bet.already": "You already bet on this event",
   "bet.resolves": "How it resolves",
   "bet.preview": "Match preview",
   "bet.more": "More",
   "bet.less": "Less",
 
-  // ── Главная (Home) ─────────────────────────────────────────────────────
-
-
   // ── Игры (Games) ───────────────────────────────────────────────────────
-  "games.title": "Games",
-  "games.subtitle": "Quick games on your TON balance",
   "games.rocketTitle": "Rocket",
   "games.rocketDesc": "Cash out before it crashes",
   "games.diceTitle": "Dice",
@@ -147,22 +115,16 @@ const en = {
   "games.caseDesc": "Open a case, win up to 200×",
   "games.basketTitle": "Basketball",
   "games.basketDesc": "Shoot, hit the basket, win",
-  "games.comingSoon": "Coming soon",
-  "rocket.close": "Back",
   "rocket.starting": "Starts in",
-  "rocket.waiting": "Waiting for round",
   "rocket.flyingAway": "Flew away!",
   "rocket.place": "Place bet",
-  "rocket.placing": "Placing…",
   "rocket.placed": "In the round",
   "rocket.cashout": "Cash out",
   "rocket.cashedOut": "Cashed out {m}",
   "rocket.youWon": "You won {amount} TON",
   "rocket.youLost": "Crashed — bet lost",
-  "rocket.amount": "Bet amount",
   "rocket.min": "Min 0.1 TON",
   "rocket.insufficient": "Not enough TON",
-  "rocket.balance": "Balance",
   "rocket.history": "Last rounds",
   "rocket.liveBets": "Live bets",
   "rocket.fair": "Provably fair",
@@ -185,6 +147,8 @@ const en = {
   "dice.stop": "Stop auto-roll",
   "case.open": "Spin",
   "case.opening": "Spinning…",
+  "case.auto": "Auto-spin",
+  "case.stop": "Stop auto-spin",
   "case.history": "Last drops",
   "case.noSpins": "No drops yet",
   "case.min": "Min {n} TON",
@@ -210,10 +174,17 @@ const en = {
 
   // ── Профиль (Profile) ──────────────────────────────────────────────────
   "profile.maskAria": "Take off or put on the mask",
-
-
-
-
+  "profile.stats": "Your stats",
+  "profile.statBets": "Total bets",
+  "profile.statWinRate": "Win rate",
+  "profile.statPnl": "Net P&L",
+  "profile.statWagered": "Wagered",
+  "profile.fairTitle": "Provably fair",
+  "profile.fairText":
+    "Every game outcome comes from a server seed committed before you play and revealed after — results can't be altered and each one is verifiable. Event bets settle automatically from public Polymarket results.",
+  "profile.support": "Support",
+  "profile.supportText": "Questions, or a Stars withdrawal? Message us directly.",
+  "profile.supportBtn": "Contact @LinkerFlugel",
 
   // ── Онбординг (Onboarding) ─────────────────────────────────────────────
   "onb.slide1Title": "Predict real-world events",
@@ -221,7 +192,7 @@ const en = {
   "onb.slide2Title": "Pick a side, win if you're right",
   "onb.slide2Text": "Choose Yes or No. Correct predictions pay out in TON.",
   "onb.slide3Title": "Top up in seconds",
-  "onb.slide3Text": "Deposit with Telegram Gifts, TON, or Stars.",
+  "onb.slide3Text": "Top up with TON or Telegram Stars.",
   "onb.slide4Title": "Cash out anytime",
   "onb.slide4Text": "Withdraw your winnings straight to your TON wallet.",
   "onb.skip": "Skip",
@@ -229,207 +200,7 @@ const en = {
   "onb.next": "Next",
 } as const;
 
-export type TKey = keyof typeof en;
-
-const ru: Record<TKey, string> = {
-  // ── Навигация (App) ────────────────────────────────────────────────────
-  "nav.home": "Главная",
-  "nav.bets": "Ставки",
-  "nav.games": "Игры",
-  "nav.profile": "Профиль",
-
-  "bets.title": "Мои ставки",
-  "bets.statActive": "Активные",
-  "bets.statInPlay": "В игре",
-  "bets.statPnl": "Прибыль",
-  "bets.empty": "Ставок пока нет",
-  "bets.emptyHint": "Выберите событие на главной",
-  "bets.statusPlaced": "Активна",
-  "bets.statusWon": "Выиграла",
-  "bets.statusLost": "Проиграла",
-  "bets.statusVoid": "Возврат",
-  "bets.stake": "Ставка",
-  "bets.toWin": "Выплата",
-  "bets.detailTitle": "Ставка",
-  "bets.profit": "Прибыль",
-  "bets.placedAt": "Поставлено",
-  "bets.starts": "Начало",
-  "bets.closes": "Закрытие",
-  "app.loadError":
-    "Ошибка загрузки: {error}. Откройте приложение из бота — без авторизации Telegram запрос не пройдёт.",
-
-  // ── Общее ──────────────────────────────────────────────────────────────
-  "common.close": "Закрыть",
-  "common.back": "Назад",
-
-  // ── Баланс / Пополнение / Вывод ────────────────────────────────────────
-  "home.yourBalance": "Ваш баланс",
-  "home.deposit": "Пополнить",
-  "home.withdraw": "Вывести",
-  "home.noEvents": "Пока нет открытых событий",
-  "home.search": "Найти событие",
-  "home.noResults": "Ничего не найдено",
-
-  "dep.title": "Пополнить баланс",
-  "dep.subtitle": "Выберите способ пополнения",
-  "dep.gifts": "Telegram-подарки",
-  "dep.giftsDesc": "Отправьте подарок боту — оценим и зачислим TON",
-  "dep.ton": "TON",
-  "dep.tonDesc": "Пополнить с любого TON-кошелька",
-  "dep.stars": "Telegram Stars",
-  "dep.starsDesc": "Оплатить звёздами",
-  "dep.gettingReady": "Дорабатываем этот способ — скоро включим.",
-  "dep.starsAmount": "Сумма в звёздах",
-  "dep.pay": "Оплатить",
-  "dep.processing": "Создаём счёт…",
-  "dep.payError": "Не удалось создать счёт. Попробуйте ещё раз.",
-  "dep.minStars": "Минимум 50 ⭐",
-  "dep.tonAmount": "Сумма в TON",
-  "dep.tonMin": "Минимум 0.1 TON",
-  "dep.tonUnavailable": "Пополнение TON сейчас недоступно",
-  "dep.tonConnect": "Подключить кошелёк",
-  "dep.tonWallet": "Кошелёк",
-  "dep.tonSwitchWallet": "Сменить кошелёк",
-  "dep.tonPay": "Оплатить",
-  "dep.tonConfirm": "Подтвердите в кошельке…",
-  "dep.tonRejected": "Транзакция отменена.",
-  "dep.tonSendError": "Не удалось отправить транзакцию. Попробуйте снова.",
-  "dep.tonWaiting": "Ждём перевод… баланс пополнится автоматически.",
-
-  "wd.title": "Вывести",
-  "wd.subtitle": "Выберите способ вывода",
-  "wd.methTon": "TON",
-  "wd.methTonDesc": "На любой TON-кошелёк",
-  "wd.methGifts": "Подарок Telegram",
-  "wd.methGiftsDesc": "Обменяйте TON на выбранный подарок",
-  "wd.comingSoon": "Дорабатываем этот способ — скоро включим.",
-  "wd.available": "Доступно",
-  "wd.amount": "Сумма",
-  "wd.max": "Макс",
-  "wd.address": "Адрес TON-кошелька",
-  "wd.addressPlaceholder": "Вставьте ваш TON-адрес",
-  "wd.submit": "Вывести",
-  "wd.submitting": "Отправляем…",
-  "wd.min": "Минимум {min} TON",
-  "wd.fee": "Комиссия сети",
-  "wd.receive": "К получению",
-  "wd.success": "Готово! Выплата в пути — баланс обновлён.",
-  "wd.unavailable": "Вывод сейчас недоступен.",
-
-  // ── Ставка (Bet) ───────────────────────────────────────────────────────
-  "bet.title": "Сделать ставку",
-  "bet.amount": "Сумма ставки",
-  "bet.payout": "Выплата при выигрыше",
-  "bet.available": "Доступно",
-  "bet.place": "Поставить",
-  "bet.min": "Минимум 0.1 TON",
-  "bet.insufficient": "Недостаточно средств — пополните баланс",
-  "bet.placing": "Ставим…",
-  "bet.success": "Ставка принята!",
-  "bet.error": "Не удалось поставить ставку",
-  "bet.resolves": "Как определяется исход",
-  "bet.preview": "Превью матча",
-  "bet.more": "Ещё",
-  "bet.less": "Свернуть",
-
-  // ── Главная (Home) ─────────────────────────────────────────────────────
-
-
-  // ── Игры (Games) ───────────────────────────────────────────────────────
-  "games.title": "Игры",
-  "games.subtitle": "Быстрые игры на ваш баланс TON",
-  "games.rocketTitle": "Ракета",
-  "games.rocketDesc": "Успей забрать до взрыва",
-  "games.diceTitle": "Кости",
-  "games.diceDesc": "Брось два кубика, угадай сумму",
-  "games.caseTitle": "Кейсы",
-  "games.caseDesc": "Открой кейс, выиграй до 200×",
-  "games.basketTitle": "Баскетбол",
-  "games.basketDesc": "Бросай, попадай в корзину, выигрывай",
-  "games.comingSoon": "Скоро",
-  "rocket.close": "Назад",
-  "rocket.starting": "Старт через",
-  "rocket.waiting": "Ждём раунд",
-  "rocket.flyingAway": "Улетела!",
-  "rocket.place": "Поставить",
-  "rocket.placing": "Ставим…",
-  "rocket.placed": "В раунде",
-  "rocket.cashout": "Забрать",
-  "rocket.cashedOut": "Забрал {m}",
-  "rocket.youWon": "Выигрыш {amount} TON",
-  "rocket.youLost": "Взрыв — ставка сгорела",
-  "rocket.amount": "Сумма ставки",
-  "rocket.min": "Минимум 0.1 TON",
-  "rocket.insufficient": "Недостаточно TON",
-  "rocket.balance": "Баланс",
-  "rocket.history": "Последние раунды",
-  "rocket.liveBets": "Ставки",
-  "rocket.fair": "Честная игра",
-  "rocket.waitNext": "Дождись следующего раунда",
-  "dice.history": "Последние броски",
-  "dice.noRolls": "Бросков ещё нет",
-  "dice.tapToRoll": "Выбери ставку и брось",
-  "dice.rolling": "Бросаем…",
-  "dice.roll": "Бросить",
-  "dice.low": "Меньше 7",
-  "dice.high": "Больше 7",
-  "dice.seven": "Ровно 7",
-  "dice.exactSum": "Точная сумма",
-  "dice.chance": "Шанс",
-  "dice.min": "Минимум 0.1 TON",
-  "dice.insufficient": "Недостаточно TON",
-  "dice.noLuck": "Не повезло — ещё раз",
-  "dice.fair": "Честная игра",
-  "dice.auto": "Авто-броски",
-  "dice.stop": "Остановить",
-  "case.open": "Крутить",
-  "case.opening": "Крутим…",
-  "case.history": "Последние дропы",
-  "case.noSpins": "Дропов ещё нет",
-  "case.min": "Минимум {n} TON",
-  "case.insufficient": "Недостаточно TON",
-  "case.contents": "Что внутри",
-  "case.empty": "Пусто — ещё раз",
-  "case.youWon": "Твой дроп",
-  "case.tapToOpen": "Поставь и крути",
-  "case.fair": "Честная игра",
-  "basket.history": "Последние броски",
-  "basket.noThrows": "Бросков ещё нет",
-  "basket.throw": "Бросить",
-  "basket.throwing": "Бросаем…",
-  "basket.chance": "Шанс",
-  "basket.score": "Попал!",
-  "basket.miss": "Мимо — ещё раз",
-  "basket.min": "Минимум {n} TON",
-  "basket.insufficient": "Недостаточно TON",
-  "basket.tapToThrow": "Поставь и бросай",
-  "basket.fair": "Честная игра",
-  "basket.auto": "Авто-броски",
-  "basket.stop": "Остановить",
-
-  // ── Профиль (Profile) ──────────────────────────────────────────────────
-  "profile.maskAria": "Снять или надеть маску",
-
-
-
-
-
-  // ── Онбординг (Onboarding) ─────────────────────────────────────────────
-  "onb.slide1Title": "Предсказывайте реальные события",
-  "onb.slide1Text": "Спорт, крипта, политика — ставьте на исход и выигрывайте.",
-  "onb.slide2Title": "Выберите сторону — угадали, выиграли",
-  "onb.slide2Text": "Да или Нет. Верный прогноз выплачивается в TON.",
-  "onb.slide3Title": "Пополнение за секунды",
-  "onb.slide3Text": "Депозит подарками Telegram, через TON или звёздами.",
-  "onb.slide4Title": "Выводите в любой момент",
-  "onb.slide4Text": "Забирайте выигрыш прямо на свой TON-кошелёк.",
-  "onb.skip": "Пропустить",
-  "onb.start": "Начать",
-  "onb.next": "Далее",
-};
-
-const DICTS: Record<Lang, Record<TKey, string>> = { en, ru };
-
+export type TKey = keyof typeof dict;
 export type Vars = Record<string, string | number>;
 export type TFunc = (key: TKey, vars?: Vars) => string;
 
@@ -440,45 +211,9 @@ function interpolate(s: string, vars?: Vars): string {
   );
 }
 
-type I18nValue = { lang: Lang; setLang: (l: Lang) => void; t: TFunc };
+const t: TFunc = (key, vars) => interpolate(dict[key], vars);
 
-const I18nContext = createContext<I18nValue | null>(null);
-
-export function I18nProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>(initialLang);
-
-  const setLang = useCallback((l: Lang) => {
-    setLangState(l);
-    try {
-      localStorage.setItem(LS_KEY, l);
-    } catch {
-      /* localStorage недоступен — выбор продержится в рамках сессии */
-    }
-  }, []);
-
-  const value = useMemo<I18nValue>(() => {
-    const dict = DICTS[lang];
-    const t: TFunc = (key, vars) =>
-      interpolate(dict[key] ?? DICTS.en[key] ?? key, vars);
-    return { lang, setLang, t };
-  }, [lang, setLang]);
-
-  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
-}
-
-function useI18n(): I18nValue {
-  const ctx = useContext(I18nContext);
-  if (!ctx) throw new Error("useI18n must be used within I18nProvider");
-  return ctx;
-}
-
-/** Хук перевода: const t = useT(); t("home.greeting"). */
+/** Хук перевода: const t = useT(); t("bet.title"). */
 export function useT(): TFunc {
-  return useI18n().t;
-}
-
-/** Текущий язык и сеттер — для переключателя в профиле. */
-export function useLang(): [Lang, (l: Lang) => void] {
-  const { lang, setLang } = useI18n();
-  return [lang, setLang];
+  return t;
 }

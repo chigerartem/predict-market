@@ -82,7 +82,6 @@ const PIP: Record<number, [number, number][]> = {
 };
 
 function PipDie({ n, size = 18, className = "" }: { n: number; size?: number; className?: string }) {
-  const u = size / 3;
   return (
     <span
       className={"inline-grid shrink-0 place-items-center rounded-[4px] bg-white text-black " + className}

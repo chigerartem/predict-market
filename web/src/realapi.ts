@@ -247,24 +247,6 @@ export async function diceRoll(
   return (await r.json()) as DiceRollResult;
 }
 
-// diceRotate reveals the current server seed and commits a fresh one (resetting the
-// nonce), so the player can verify all rolls drawn under the old seed.
-export async function diceRotate(clientSeed?: string): Promise<{
-  old_server_seed: string;
-  old_server_hash: string;
-  rolled_nonce: number;
-  server_seed_hash: string;
-  client_seed: string;
-}> {
-  const r = await fetch(`${API_BASE}/api/dice/rotate`, {
-    method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ client_seed: clientSeed ?? "" }),
-  });
-  if (!r.ok) throw new Error(`dice rotate ${r.status}`);
-  return await r.json();
-}
-
 // ── Case opening (instant CS:GO-style game) ───────────────────────────────
 
 export type CasePrize = {
@@ -328,24 +310,6 @@ export async function caseOpen(stakeNano: number): Promise<CaseSpinResult> {
   return (await r.json()) as CaseSpinResult;
 }
 
-// caseRotate reveals the current server seed and commits a fresh one (resetting the
-// nonce), so the player can verify all spins drawn under the old seed.
-export async function caseRotate(clientSeed?: string): Promise<{
-  old_server_seed: string;
-  old_server_hash: string;
-  spun_nonce: number;
-  server_seed_hash: string;
-  client_seed: string;
-}> {
-  const r = await fetch(`${API_BASE}/api/case/rotate`, {
-    method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ client_seed: clientSeed ?? "" }),
-  });
-  if (!r.ok) throw new Error(`case rotate ${r.status}`);
-  return await r.json();
-}
-
 // ── Basketball (instant shot game) ────────────────────────────────────────
 
 export type BasketThrowRow = {
@@ -407,23 +371,6 @@ export async function basketThrow(stakeNano: number): Promise<BasketThrowResult>
     throw new Error(e.error || `basket throw ${r.status}`);
   }
   return (await r.json()) as BasketThrowResult;
-}
-
-// basketRotate reveals the current server seed and commits a fresh one.
-export async function basketRotate(clientSeed?: string): Promise<{
-  old_server_seed: string;
-  old_server_hash: string;
-  thrown_nonce: number;
-  server_seed_hash: string;
-  client_seed: string;
-}> {
-  const r = await fetch(`${API_BASE}/api/basket/rotate`, {
-    method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ client_seed: clientSeed ?? "" }),
-  });
-  if (!r.ok) throw new Error(`basket rotate ${r.status}`);
-  return await r.json();
 }
 
 // fetchMyBets returns the user's bets (newest first), with market + outcome titles.

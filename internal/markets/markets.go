@@ -30,10 +30,10 @@ type Outcome struct {
 
 // Market is a prediction market with its outcomes.
 type Market struct {
-	ID                int64
-	Source            string
-	Title             string
-	Category          string
+	ID                 int64
+	Source             string
+	Title              string
+	Category           string
 	Status             string
 	CloseTime          *time.Time
 	GameStart          *time.Time
@@ -177,34 +177,6 @@ func CloseStaleExternal(ctx context.Context, pool *pgxpool.Pool, source string, 
 		return 0, err
 	}
 	return ct.RowsAffected(), nil
-}
-
-// GetMarket loads a market and its outcomes by id.
-func GetMarket(ctx context.Context, pool *pgxpool.Pool, id int64) (Market, error) {
-	var m Market
-	if err := pool.QueryRow(ctx,
-		`SELECT id, source, title, COALESCE(category, ''), status, close_time, COALESCE(image_url, ''), resolved_outcome_id
-		   FROM markets WHERE id = $1`, id).Scan(
-		&m.ID, &m.Source, &m.Title, &m.Category, &m.Status, &m.CloseTime, &m.ImageURL, &m.ResolvedOutcomeID); err != nil {
-		return Market{}, err
-	}
-
-	rows, err := pool.Query(ctx,
-		`SELECT id, market_id, title, odds_milli, max_liability_nano, total_stake_nano, total_payout_nano
-		   FROM outcomes WHERE market_id = $1 ORDER BY sort_order, id`, id)
-	if err != nil {
-		return Market{}, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var oc Outcome
-		if err := rows.Scan(&oc.ID, &oc.MarketID, &oc.Title, &oc.OddsMilli,
-			&oc.MaxLiabilityNano, &oc.TotalStakeNano, &oc.TotalPayoutNano); err != nil {
-			return Market{}, err
-		}
-		m.Outcomes = append(m.Outcomes, oc)
-	}
-	return m, rows.Err()
 }
 
 // maxSharedImage: an image reused by more than this many open markets is treated as

@@ -1,49 +1,20 @@
-// Тактильная отдача Telegram WebApp — крошечные безопасные обёртки + один
-// глобальный делегат «нажатия». Все вызовы best-effort: на старых клиентах и в
-// обычном браузере просто no-op. Философия Emil Kowalski: отдача на момент
-// нажатия (pointerdown), как у физической клавиши; слайдеры «щёлкают» на каждом
-// дискретном шаге (ратчет, как у iOS-пикера).
+// Тактильная отдача Telegram WebApp — крошечная безопасная обёртка + один глобальный
+// делегат «нажатия». Все вызовы best-effort: на старых клиентах и в обычном браузере
+// просто no-op. Философия Emil Kowalski: отдача на момент нажатия (pointerdown), как у
+// физической клавиши.
 
 type ImpactStyle = "light" | "medium" | "heavy" | "rigid" | "soft";
-type NotificationType = "success" | "warning" | "error";
 
 function hf() {
   return window.Telegram?.WebApp?.HapticFeedback;
 }
 
-export function impact(style: ImpactStyle = "light"): void {
+function impact(style: ImpactStyle = "light"): void {
   try {
     hf()?.impactOccurred?.(style);
   } catch {
     /* старый клиент / не Telegram — игнор */
   }
-}
-
-export function selection(): void {
-  try {
-    hf()?.selectionChanged?.();
-  } catch {
-    /* noop */
-  }
-}
-
-export function notify(type: NotificationType): void {
-  try {
-    hf()?.notificationOccurred?.(type);
-  } catch {
-    /* noop */
-  }
-}
-
-// Возвращает функцию, которая щёлкает selection() только когда дискретное
-// значение реально изменилось — даёт «ратчет», не жужжа на каждый пиксель.
-export function makeSelectionTicker(): (value: number | string) => void {
-  let last: number | string | null = null;
-  return (value) => {
-    if (value === last) return;
-    last = value;
-    selection();
-  };
 }
 
 let tapInstalled = false;

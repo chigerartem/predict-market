@@ -60,9 +60,6 @@ func NewStore(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Store, erro
 	return &Store{pool: pool, cfg: cfg, escrow: escrow, treasury: treasury}, nil
 }
 
-// Config exposes the economics so the API can hand them (and the prize table) to the client.
-func (s *Store) Config() Config { return s.cfg }
-
 // payoutNano = floor(price * multMilli / 1000), in big.Int to avoid overflow.
 func payoutNano(priceNano, multMilli int64) int64 {
 	p := new(big.Int).Mul(big.NewInt(priceNano), big.NewInt(multMilli))

@@ -10,8 +10,8 @@ func TestSeedHashStable(t *testing.T) {
 	if got := SeedHash(seed); len(got) != 64 {
 		t.Fatalf("hash len = %d, want 64", len(got))
 	}
-	// Deterministic.
-	if SeedHash(seed) != SeedHash(seed) {
+	// Deterministic: same seed → same hash on repeated calls.
+	if a, b := SeedHash(seed), SeedHash(seed); a != b {
 		t.Fatal("hash not deterministic")
 	}
 }

@@ -30,7 +30,8 @@ __pycache__/
 tmp/
 .DS_Store
 
-# --- IDE ---
+# --- IDE / tooling ---
 .idea/
 .vscode/
 *.swp
+.claude/

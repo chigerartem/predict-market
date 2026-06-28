@@ -57,9 +57,6 @@ func NewStore(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Store, erro
 	return &Store{pool: pool, cfg: cfg, escrow: escrow, treasury: treasury}, nil
 }
 
-// Config exposes the stake bounds.
-func (s *Store) Config() Config { return s.cfg }
-
 // payoutNano = floor(stake * multMilli / 1000), in big.Int to avoid overflow.
 func payoutNano(stakeNano, multMilli int64) int64 {
 	p := new(big.Int).Mul(big.NewInt(stakeNano), big.NewInt(multMilli))
