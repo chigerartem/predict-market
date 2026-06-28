@@ -9,21 +9,21 @@ import { getLottieData } from "../lottieCache";
 // «Баскетбол» — мгновенная игра: ставишь любую сумму и бросаешь мяч. Сервер тянет один из
 // 5 исходов по редкости (3 промаха + 2 попадания) и отдаёт КОНКРЕТНУЮ 🏀-анимацию — фронт
 // её играет; попал = выигрыш (ставка × множитель тира), мимо = ставка теряется. Деньги
-// авторитетны на сервере (provably-fair). Авто-броски — как в Костях (тумблер, быстрее).
-// Фон — нарисованный баскетбольный зал в перспективе; камера НАЕЗЖАЕТ на кольцо во время
-// броска (синхронно с приближением кольца в анимации) и отъезжает назад после.
+// авторитетны на сервере. Авто-броски — как в Костях. Фон — баскетбольный зал в перспективе;
+// камера во время броска ПРИВЯЗАНА К КАДРАМ анимации (onFrame) и едет за мячом по дуге
+// (наезд + проводка вниз в корзину), после — отъезд назад.
 
-const MIN_NANO = 100_000_000; // 0.1 TON
+const MIN_NANO = 100_000_000;
 const PRESETS = [0.1, 1, 5, 25];
-const IDLE_ANIM = "basket-hit-1"; // первый кадр = мяч готов; кэшируется → мгновенный покой
-const THROW_SPEED = 1.15;     // обычный бросок ~3с → ~2.6с
-const AUTO_THROW_SPEED = 1.7; // авто-бросок заметно быстрее
-const AUTO_PAUSE_MS = 500;    // пауза показа результата между авто-бросками
+const IDLE_ANIM = "basket-hit-1";
+const THROW_SPEED = 1.15;
+const AUTO_THROW_SPEED = 1.7;
+const AUTO_PAUSE_MS = 500;
 const THROW_FALLBACK_MS = 3400;
-const ANIM_MS = 3000;         // длина 🏀-анимации (180 кадров @ 60fps)
-const CAM_ZOOM = 1.32;        // насколько камера наезжает на кольцо в броске
+const CAM_ZOOM = 1.5;  // наезд камеры к концу броска
+const CAM_DOWN = 34;   // px, проводка камеры вниз за мячом (в корзину)
 
-const TOP = "#06070e"; // верх экрана = тёмный потолок зала (плашка TG сливается)
+const TOP = "#06070e";
 const BG_BOTTOM = "#06070e";
 
 function haptic(style: "light" | "medium" | "heavy" | "rigid" | "soft") {
@@ -49,16 +49,16 @@ function normStake(raw: string): string {
 
 const fmtMult = (milli: number) => (milli / 1000).toFixed(milli % 1000 === 0 ? 0 : milli % 100 === 0 ? 1 : 2);
 
-// ── Баскетбольный зал (процедурный SVG в 1-точечной перспективе): деревянный пол, задняя
-//    стена со щитом, боковые трибуны и потолок — всё сходится к точке схода у кольца.
-//    Разметка на полу (краска, дуга, круг штрафного), тёплый спот, виньетка.
-const VP = { x: 180, y: 180 };                  // точка схода (центр задней стены)
-const FLOOR = "-70,660 430,660 249,288 111,288"; // пол (трапеция)
-const FARWALL = "111,130 249,130 249,288 111,288"; // задняя стена (за щитом)
-const LWALL = "-70,-40 111,130 111,288 -70,660";   // левая трибуна/стена
-const RWALL = "430,-40 249,130 249,288 430,660";   // правая
-const CEIL = "-70,-40 430,-40 249,130 111,130";    // потолок
-const PLANKS = Array.from({ length: 15 }, (_, i) => -90 + (i / 14) * 540); // x низа досок
+// ── Баскетбольный зал (процедурный SVG, 1-точечная перспектива). ШИРОКИЙ корт: дальний
+//    край (лицевая) широкий, перспектива не «коридором». Пол, задняя стена со щитом,
+//    боковые трибуны, потолок — к точке схода у кольца. Разметка, спот, виньетка.
+const VP = { x: 180, y: 200 };
+const FLOOR = "-110,660 470,660 290,300 70,300";
+const FARWALL = "70,120 290,120 290,300 70,300";
+const LWALL = "-110,-40 70,120 70,300 -110,660";
+const RWALL = "470,-40 290,120 290,300 470,660";
+const CEIL = "-110,-40 470,-40 290,120 70,120";
+const PLANKS = Array.from({ length: 17 }, (_, i) => -130 + (i / 16) * 620);
 const BasketCourt = memo(function BasketCourt() {
   return (
     <svg className="absolute inset-0 h-full w-full" viewBox="0 0 360 640" preserveAspectRatio="xMidYMid slice" aria-hidden>
@@ -78,57 +78,52 @@ const BasketCourt = memo(function BasketCourt() {
         <radialGradient id="bLight" cx="0.5" cy="0" r="0.75">
           <stop offset="0" stopColor="#cfe0ff" stopOpacity="0.20" /><stop offset="1" stopColor="#cfe0ff" stopOpacity="0" />
         </radialGradient>
-        <radialGradient id="bSpot" cx="0.5" cy="0.64" r="0.6">
+        <radialGradient id="bSpot" cx="0.5" cy="0.64" r="0.62">
           <stop offset="0" stopColor="#ffd28c" stopOpacity="0.30" /><stop offset="0.55" stopColor="#ffb95e" stopOpacity="0.08" /><stop offset="1" stopColor="#ffb95e" stopOpacity="0" />
         </radialGradient>
-        <radialGradient id="bVig" cx="0.5" cy="0.5" r="0.75">
-          <stop offset="0.56" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity="0.62" />
+        <radialGradient id="bVig" cx="0.5" cy="0.5" r="0.78">
+          <stop offset="0.56" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity="0.6" />
         </radialGradient>
         <clipPath id="bFloorClip"><polygon points={FLOOR} /></clipPath>
       </defs>
 
-      {/* зал-коробка: потолок, стены, задняя стена */}
       <rect x="0" y="0" width="360" height="640" fill="#06070e" />
       <polygon points={CEIL} fill="#070912" />
       <polygon points={LWALL} fill="url(#bLwall)" />
       <polygon points={RWALL} fill="url(#bRwall)" />
-      {/* лёгкие линии трибун (к точке схода) */}
       <g stroke="#ffffff" strokeOpacity="0.045" strokeWidth="1">
-        <line x1="-70" y1="120" x2="111" y2="170" /><line x1="-70" y1="320" x2="111" y2="220" /><line x1="-70" y1="540" x2="111" y2="266" />
-        <line x1="430" y1="120" x2="249" y2="170" /><line x1="430" y1="320" x2="249" y2="220" /><line x1="430" y1="540" x2="249" y2="266" />
+        <line x1="-110" y1="120" x2="70" y2="165" /><line x1="-110" y1="340" x2="70" y2="230" /><line x1="-110" y1="560" x2="70" y2="282" />
+        <line x1="470" y1="120" x2="290" y2="165" /><line x1="470" y1="340" x2="290" y2="230" /><line x1="470" y1="560" x2="290" y2="282" />
       </g>
       <polygon points={FARWALL} fill="url(#bFar)" />
-      <rect x="111" y="120" width="138" height="64" fill="url(#bLight)" />
+      <rect x="70" y="108" width="220" height="74" fill="url(#bLight)" />
 
-      {/* пол + разметка */}
       <polygon points={FLOOR} fill="url(#bWood)" />
       <g clipPath="url(#bFloorClip)" stroke="#ffffff" fill="none">
-        <g stroke="#000000" strokeOpacity="0.18" strokeWidth="2">
+        <g stroke="#000000" strokeOpacity="0.17" strokeWidth="2">
           {PLANKS.map((xb, i) => <line key={i} x1={xb} y1={660} x2={VP.x} y2={VP.y} />)}
         </g>
-        <g stroke="#ffe6c0" strokeOpacity="0.09" strokeWidth="1">
-          {PLANKS.map((xb, i) => <line key={i} x1={xb + 9} y1={660} x2={VP.x + 1} y2={VP.y} />)}
+        <g stroke="#ffe6c0" strokeOpacity="0.08" strokeWidth="1">
+          {PLANKS.map((xb, i) => <line key={i} x1={xb + 10} y1={660} x2={VP.x + 1} y2={VP.y} />)}
         </g>
-        <path d="M 96 288 Q 180 558 264 288" strokeOpacity="0.5" strokeWidth="3" />
-        <polygon points="156,288 204,288 231,470 129,470" fill="#c2410c" fillOpacity="0.20" stroke="none" />
-        <polygon points="156,288 204,288 231,470 129,470" strokeOpacity="0.55" strokeWidth="3" />
-        <line x1="129" y1="470" x2="231" y2="470" strokeOpacity="0.55" strokeWidth="3" />
-        <ellipse cx="180" cy="470" rx="51" ry="17" strokeOpacity="0.45" strokeWidth="3" />
+        <path d="M 40 300 Q 180 596 320 300" strokeOpacity="0.5" strokeWidth="3" />
+        <polygon points="155,300 205,300 251,486 109,486" fill="#c2410c" fillOpacity="0.20" stroke="none" />
+        <polygon points="155,300 205,300 251,486 109,486" strokeOpacity="0.55" strokeWidth="3" />
+        <line x1="109" y1="486" x2="251" y2="486" strokeOpacity="0.55" strokeWidth="3" />
+        <ellipse cx="180" cy="486" rx="71" ry="22" strokeOpacity="0.45" strokeWidth="3" />
       </g>
-      {/* лицевая (стык пола и задней стены) + боковые линии корта */}
       <g stroke="#ffffff" fill="none" strokeWidth="2">
-        <line x1="111" y1="288" x2="249" y2="288" strokeOpacity="0.5" />
-        <line x1="111" y1="288" x2="-70" y2="660" strokeOpacity="0.28" />
-        <line x1="249" y1="288" x2="430" y2="660" strokeOpacity="0.28" />
+        <line x1="70" y1="300" x2="290" y2="300" strokeOpacity="0.5" />
+        <line x1="70" y1="300" x2="-110" y2="660" strokeOpacity="0.26" />
+        <line x1="290" y1="300" x2="470" y2="660" strokeOpacity="0.26" />
       </g>
 
-      <ellipse cx="180" cy="432" rx="230" ry="185" fill="url(#bSpot)" />
+      <ellipse cx="180" cy="440" rx="250" ry="190" fill="url(#bSpot)" />
       <rect x="0" y="0" width="360" height="640" fill="url(#bVig)" />
     </svg>
   );
 });
 
-// Тумблер (как в Костях).
 function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
     <button type="button" role="switch" aria-checked={on} onClick={onToggle}
@@ -148,7 +143,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [throwSeq, setThrowSeq] = useState(0);
   const [throwAnim, setThrowAnim] = useState("basket-miss-1");
-  const [throwSpeed, setThrowSpeed] = useState(THROW_SPEED); // захвачена на старте броска
+  const [throwSpeed, setThrowSpeed] = useState(THROW_SPEED);
   const [pending, setPending] = useState(false);
   const [auto, setAuto] = useState(false);
   const [result, setResult] = useState<{ hit: boolean; payout: number; mult: number } | null>(null);
@@ -168,7 +163,6 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
   const chancePct = (st?.hit_prob_bp ?? 5000) / 100;
   const scoreMults = (st?.scores ?? []).map((s) => fmtMult(s.mult_milli) + "×").join(" / ");
 
-  // Высота clip-слоя до первого paint; расфокус = стабильная --app-h, фокус = visualViewport.
   useLayoutEffect(() => {
     const vv = window.visualViewport;
     const el = clipRef.current;
@@ -197,25 +191,27 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // Камера-наезд: во время броска зал НАЕЗЖАЕТ на кольцо (зум CAM_ZOOM, origin у щита) —
-  // синхронно с приближением кольца в 🏀-анимации (длительность = длина анимации / speed).
-  // После броска (revealed/idle) — плавно отъезжаем назад (scale 1). Сброс на старте броска
-  // мгновенный (как анимация ремаунтится с дальнего кадра).
+  // Камера: во время throwing КАЖДЫЙ кадр анимации (onThrowFrame) двигает зал — наезд +
+  // проводка вниз за мячом, синхронно с лотти. Вне броска — плавный отъезд к исходному.
   useLayoutEffect(() => {
     const c = courtRef.current;
     if (!c) return;
     if (phase === "throwing") {
-      const dur = Math.round((ANIM_MS - 200) / throwSpeed); // чуть короче анимации, успеть до «попал»
-      c.style.transition = "none";
-      c.style.transform = "scale(1)";
-      void c.offsetWidth; // reflow → старт с дальнего плана
-      c.style.transition = `transform ${dur}ms cubic-bezier(0.42, 0, 0.7, 1)`;
-      c.style.transform = `scale(${CAM_ZOOM})`;
+      c.style.transition = "none"; // кадры драйвят transform напрямую
     } else {
-      c.style.transition = "transform 800ms cubic-bezier(0.3, 0, 0.2, 1)";
-      c.style.transform = "scale(1)";
+      c.style.transition = "transform 700ms cubic-bezier(0.3, 0, 0.2, 1)";
+      c.style.transform = "translateY(0px) scale(1)";
     }
-  }, [phase, throwSeq, throwSpeed]);
+  }, [phase, throwSeq]);
+
+  const onThrowFrame = useCallback((p: number) => {
+    const c = courtRef.current;
+    if (!c) return;
+    const e = p * p; // ускоряемся к корзине
+    const s = 1 + (CAM_ZOOM - 1) * e;
+    const ty = CAM_DOWN * e;
+    c.style.transform = `translateY(${ty}px) scale(${s})`;
+  }, []);
 
   const reloadBalance = useCallback(() => {
     fetchMe().then((m) => setBalanceNano(m.balance_nano)).catch(() => {});
@@ -323,8 +319,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed left-0 top-0 z-50 w-full overflow-hidden text-white" style={{ height: "var(--app-h, 100dvh)", background: BG_BOTTOM }}>
       <div ref={clipRef} className="absolute inset-x-0 top-0 overflow-hidden" style={{ height: "var(--app-h, 100dvh)" }}>
-        {/* зал + камера-наезд (origin у кольца) */}
-        <div ref={courtRef} className="pointer-events-none absolute inset-0 will-change-transform" style={{ transformOrigin: "50% 34%" }}>
+        <div ref={courtRef} className="pointer-events-none absolute inset-0 will-change-transform" style={{ transformOrigin: "50% 30%" }}>
           <BasketCourt />
         </div>
 
@@ -366,6 +361,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
                   loop={false}
                   autoplay
                   speed={throwSpeed}
+                  onFrame={onThrowFrame}
                   onComplete={finalize}
                 />
               )}

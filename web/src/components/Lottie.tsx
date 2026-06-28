@@ -16,6 +16,7 @@ export default function Lottie({
   loop = true,
   autoplay = true,
   onComplete,
+  onFrame,
   freeze,
   speed = 1,
 }: {
@@ -25,12 +26,15 @@ export default function Lottie({
   loop?: boolean;
   autoplay?: boolean;
   onComplete?: () => void;
+  onFrame?: (progress: number) => void; // прогресс 0..1 на каждом кадре (для синхро-камеры)
   freeze?: "last";
   speed?: number; // множитель скорости проигрывания (1 = норма; >1 быстрее, для авто-режима)
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const cbRef = useRef(onComplete);
   cbRef.current = onComplete; // всегда свежий колбэк без перезапуска эффекта
+  const frameRef = useRef(onFrame);
+  frameRef.current = onFrame;
   // freeze="last": прячем контейнер, пока не встанем на последний кадр. Иначе до события
   // DOMLoaded lottie показывает кадр 0 (для кубиков — «кубик в полёте»), и при каждой
   // смене src (грани) это мелькает как лишняя прокрутка. Скрыт → виден ровно гранью.
@@ -47,6 +51,11 @@ export default function Lottie({
     if (speed !== 1) anim.setSpeed(speed);
     const handleComplete = () => cbRef.current?.();
     anim.addEventListener("complete", handleComplete);
+    const handleFrame = () => {
+      const total = anim.totalFrames || 1;
+      frameRef.current?.(Math.min(1, anim.currentFrame / total));
+    };
+    anim.addEventListener("enterFrame", handleFrame);
     let handleLoaded: (() => void) | undefined;
     if (freeze === "last") {
       handleLoaded = () => {
@@ -57,6 +66,7 @@ export default function Lottie({
     }
     return () => {
       anim.removeEventListener("complete", handleComplete);
+      anim.removeEventListener("enterFrame", handleFrame);
       if (handleLoaded) anim.removeEventListener("DOMLoaded", handleLoaded);
       anim.destroy();
     };
