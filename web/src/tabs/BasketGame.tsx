@@ -9,8 +9,9 @@ import { getLottieData } from "../lottieCache";
 // «Баскетбол» — мгновенная игра: ставишь любую сумму и бросаешь мяч. Сервер тянет один из
 // 5 исходов по редкости (3 промаха + 2 попадания) и отдаёт КОНКРЕТНУЮ 🏀-анимацию — фронт
 // её играет; попал = выигрыш (ставка × множитель тира), мимо = ставка теряется. Деньги
-// авторитетны на сервере (provably-fair commit+nonce). Авто-броски — как в Костях (тумблер,
-// крутит сам пока есть деньги, чуть быстрее). Фон — нарисованная баскетбольная площадка.
+// авторитетны на сервере (provably-fair). Авто-броски — как в Костях (тумблер, быстрее).
+// Фон — нарисованный баскетбольный зал в перспективе; камера НАЕЗЖАЕТ на кольцо во время
+// броска (синхронно с приближением кольца в анимации) и отъезжает назад после.
 
 const MIN_NANO = 100_000_000; // 0.1 TON
 const PRESETS = [0.1, 1, 5, 25];
@@ -19,9 +20,11 @@ const THROW_SPEED = 1.15;     // обычный бросок ~3с → ~2.6с
 const AUTO_THROW_SPEED = 1.7; // авто-бросок заметно быстрее
 const AUTO_PAUSE_MS = 500;    // пауза показа результата между авто-бросками
 const THROW_FALLBACK_MS = 3400;
+const ANIM_MS = 3000;         // длина 🏀-анимации (180 кадров @ 60fps)
+const CAM_ZOOM = 1.32;        // насколько камера наезжает на кольцо в броске
 
-const TOP = "#0a0d18"; // верх экрана = тёмный верх площадки (плашка TG сливается)
-const BG_BOTTOM = "#0a0d18";
+const TOP = "#06070e"; // верх экрана = тёмный потолок зала (плашка TG сливается)
+const BG_BOTTOM = "#06070e";
 
 function haptic(style: "light" | "medium" | "heavy" | "rigid" | "soft") {
   try {
@@ -46,68 +49,81 @@ function normStake(raw: string): string {
 
 const fmtMult = (milli: number) => (milli / 1000).toFixed(milli % 1000 === 0 ? 0 : milli % 100 === 0 ? 1 : 2);
 
-// ── Баскетбольная площадка (процедурный SVG, не картинка). Вид от лица бросающего:
-//    деревянный пол уходит В ПЕРСПЕКТИВЕ к щиту наверху, разметка (краска, дуга, круг
-//    штрафного) сходится к точке схода. Доски пола = линии к точке схода. Тёплый спот.
-const VP = { x: 180, y: 118 };  // точка схода (≈ где висит щит)
-const HZ = 288;                  // линия пола под щитом (дальний край)
-const FLOOR = "-70,660 430,660 249,288 111,288"; // трапеция пола (с запасом за края)
+// ── Баскетбольный зал (процедурный SVG в 1-точечной перспективе): деревянный пол, задняя
+//    стена со щитом, боковые трибуны и потолок — всё сходится к точке схода у кольца.
+//    Разметка на полу (краска, дуга, круг штрафного), тёплый спот, виньетка.
+const VP = { x: 180, y: 180 };                  // точка схода (центр задней стены)
+const FLOOR = "-70,660 430,660 249,288 111,288"; // пол (трапеция)
+const FARWALL = "111,130 249,130 249,288 111,288"; // задняя стена (за щитом)
+const LWALL = "-70,-40 111,130 111,288 -70,660";   // левая трибуна/стена
+const RWALL = "430,-40 249,130 249,288 430,660";   // правая
+const CEIL = "-70,-40 430,-40 249,130 111,130";    // потолок
 const PLANKS = Array.from({ length: 15 }, (_, i) => -90 + (i / 14) * 540); // x низа досок
 const BasketCourt = memo(function BasketCourt() {
   return (
-    <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 360 640" preserveAspectRatio="xMidYMid slice" aria-hidden>
+    <svg className="absolute inset-0 h-full w-full" viewBox="0 0 360 640" preserveAspectRatio="xMidYMid slice" aria-hidden>
       <defs>
-        <linearGradient id="arena" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#0a0d18" />
-          <stop offset="0.45" stopColor="#15110b" />
-          <stop offset="1" stopColor="#23180d" />
+        <linearGradient id="bWood" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#3f2a14" /><stop offset="0.55" stopColor="#6e4a23" /><stop offset="1" stopColor="#a4703a" />
         </linearGradient>
-        <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#3f2a14" />
-          <stop offset="0.55" stopColor="#6e4a23" />
-          <stop offset="1" stopColor="#a4703a" />
+        <linearGradient id="bLwall" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#0a0e1c" /><stop offset="1" stopColor="#1a2138" />
         </linearGradient>
-        <radialGradient id="spot" cx="0.5" cy="0.62" r="0.6">
-          <stop offset="0" stopColor="#ffd28c" stopOpacity="0.30" />
-          <stop offset="0.55" stopColor="#ffb95e" stopOpacity="0.08" />
-          <stop offset="1" stopColor="#ffb95e" stopOpacity="0" />
+        <linearGradient id="bRwall" x1="1" y1="0" x2="0" y2="0">
+          <stop offset="0" stopColor="#0a0e1c" /><stop offset="1" stopColor="#1a2138" />
+        </linearGradient>
+        <linearGradient id="bFar" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#1d3a61" /><stop offset="1" stopColor="#0e2138" />
+        </linearGradient>
+        <radialGradient id="bLight" cx="0.5" cy="0" r="0.75">
+          <stop offset="0" stopColor="#cfe0ff" stopOpacity="0.20" /><stop offset="1" stopColor="#cfe0ff" stopOpacity="0" />
         </radialGradient>
-        <radialGradient id="vig" cx="0.5" cy="0.5" r="0.75">
-          <stop offset="0.6" stopColor="#000" stopOpacity="0" />
-          <stop offset="1" stopColor="#000" stopOpacity="0.55" />
+        <radialGradient id="bSpot" cx="0.5" cy="0.64" r="0.6">
+          <stop offset="0" stopColor="#ffd28c" stopOpacity="0.30" /><stop offset="0.55" stopColor="#ffb95e" stopOpacity="0.08" /><stop offset="1" stopColor="#ffb95e" stopOpacity="0" />
         </radialGradient>
-        <clipPath id="floorClip"><polygon points={FLOOR} /></clipPath>
+        <radialGradient id="bVig" cx="0.5" cy="0.5" r="0.75">
+          <stop offset="0.56" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity="0.62" />
+        </radialGradient>
+        <clipPath id="bFloorClip"><polygon points={FLOOR} /></clipPath>
       </defs>
 
-      {/* зал (фон) + деревянный пол */}
-      <rect x="0" y="0" width="360" height="640" fill="url(#arena)" />
-      <polygon points={FLOOR} fill="url(#wood)" />
+      {/* зал-коробка: потолок, стены, задняя стена */}
+      <rect x="0" y="0" width="360" height="640" fill="#06070e" />
+      <polygon points={CEIL} fill="#070912" />
+      <polygon points={LWALL} fill="url(#bLwall)" />
+      <polygon points={RWALL} fill="url(#bRwall)" />
+      {/* лёгкие линии трибун (к точке схода) */}
+      <g stroke="#ffffff" strokeOpacity="0.045" strokeWidth="1">
+        <line x1="-70" y1="120" x2="111" y2="170" /><line x1="-70" y1="320" x2="111" y2="220" /><line x1="-70" y1="540" x2="111" y2="266" />
+        <line x1="430" y1="120" x2="249" y2="170" /><line x1="430" y1="320" x2="249" y2="220" /><line x1="430" y1="540" x2="249" y2="266" />
+      </g>
+      <polygon points={FARWALL} fill="url(#bFar)" />
+      <rect x="111" y="120" width="138" height="64" fill="url(#bLight)" />
 
-      {/* всё, что на полу — клипуем по трапеции */}
-      <g clipPath="url(#floorClip)" stroke="#ffffff" fill="none">
-        {/* доски: линии к точке схода */}
+      {/* пол + разметка */}
+      <polygon points={FLOOR} fill="url(#bWood)" />
+      <g clipPath="url(#bFloorClip)" stroke="#ffffff" fill="none">
         <g stroke="#000000" strokeOpacity="0.18" strokeWidth="2">
           {PLANKS.map((xb, i) => <line key={i} x1={xb} y1={660} x2={VP.x} y2={VP.y} />)}
         </g>
-        {/* блик-полоса вдоль досок */}
-        <g stroke="#ffe6c0" strokeOpacity="0.10" strokeWidth="1">
+        <g stroke="#ffe6c0" strokeOpacity="0.09" strokeWidth="1">
           {PLANKS.map((xb, i) => <line key={i} x1={xb + 9} y1={660} x2={VP.x + 1} y2={VP.y} />)}
         </g>
-        {/* трёхочковая дуга */}
-        <path d="M 96 288 Q 180 566 264 288" strokeOpacity="0.55" strokeWidth="3" />
-        {/* краска (трапеция от щита к штрафной) */}
-        <polygon points="156,288 204,288 231,474 129,474" fill="#c2410c" fillOpacity="0.22" stroke="none" />
-        <polygon points="156,288 204,288 231,474 129,474" strokeOpacity="0.6" strokeWidth="3" />
-        {/* линия штрафного + круг (сплюснут перспективой) */}
-        <line x1="129" y1="474" x2="231" y2="474" strokeOpacity="0.6" strokeWidth="3" />
-        <ellipse cx="180" cy="474" rx="51" ry="17" strokeOpacity="0.5" strokeWidth="3" />
-        {/* лицевая (под щитом) */}
-        <line x1="111" y1="288" x2="249" y2="288" strokeOpacity="0.5" strokeWidth="3" />
+        <path d="M 96 288 Q 180 558 264 288" strokeOpacity="0.5" strokeWidth="3" />
+        <polygon points="156,288 204,288 231,470 129,470" fill="#c2410c" fillOpacity="0.20" stroke="none" />
+        <polygon points="156,288 204,288 231,470 129,470" strokeOpacity="0.55" strokeWidth="3" />
+        <line x1="129" y1="470" x2="231" y2="470" strokeOpacity="0.55" strokeWidth="3" />
+        <ellipse cx="180" cy="470" rx="51" ry="17" strokeOpacity="0.45" strokeWidth="3" />
+      </g>
+      {/* лицевая (стык пола и задней стены) + боковые линии корта */}
+      <g stroke="#ffffff" fill="none" strokeWidth="2">
+        <line x1="111" y1="288" x2="249" y2="288" strokeOpacity="0.5" />
+        <line x1="111" y1="288" x2="-70" y2="660" strokeOpacity="0.28" />
+        <line x1="249" y1="288" x2="430" y2="660" strokeOpacity="0.28" />
       </g>
 
-      {/* свет на площадке + виньетка по краям */}
-      <ellipse cx="180" cy="430" rx="230" ry="180" fill="url(#spot)" />
-      <rect x="0" y="0" width="360" height="640" fill="url(#vig)" />
+      <ellipse cx="180" cy="432" rx="230" ry="185" fill="url(#bSpot)" />
+      <rect x="0" y="0" width="360" height="640" fill="url(#bVig)" />
     </svg>
   );
 });
@@ -140,19 +156,19 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
   const [err, setErr] = useState<string | null>(null);
 
   const clipRef = useRef<HTMLDivElement>(null);
+  const courtRef = useRef<HTMLDivElement>(null);
   const ctxRef = useRef<BasketThrowResult | null>(null);
   const settledRef = useRef(true);
   const fallbackRef = useRef<number>(0);
   const autoRef = useRef(auto);
-  autoRef.current = auto; // свежее значение для захвата скорости в shoot()
+  autoRef.current = auto;
   const shootRef = useRef<() => void>(() => {});
 
   const minNano = st?.min_stake_nano ?? MIN_NANO;
   const chancePct = (st?.hit_prob_bp ?? 5000) / 100;
   const scoreMults = (st?.scores ?? []).map((s) => fmtMult(s.mult_milli) + "×").join(" / ");
 
-  // Высота clip-слоя до первого paint (useLayoutEffect), расфокус = стабильная --app-h,
-  // фокус = visualViewport (клавиатура). Как в Костях — без «доводки» при входе.
+  // Высота clip-слоя до первого paint; расфокус = стабильная --app-h, фокус = visualViewport.
   useLayoutEffect(() => {
     const vv = window.visualViewport;
     const el = clipRef.current;
@@ -180,6 +196,26 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, []);
+
+  // Камера-наезд: во время броска зал НАЕЗЖАЕТ на кольцо (зум CAM_ZOOM, origin у щита) —
+  // синхронно с приближением кольца в 🏀-анимации (длительность = длина анимации / speed).
+  // После броска (revealed/idle) — плавно отъезжаем назад (scale 1). Сброс на старте броска
+  // мгновенный (как анимация ремаунтится с дальнего кадра).
+  useLayoutEffect(() => {
+    const c = courtRef.current;
+    if (!c) return;
+    if (phase === "throwing") {
+      const dur = Math.round((ANIM_MS - 200) / throwSpeed); // чуть короче анимации, успеть до «попал»
+      c.style.transition = "none";
+      c.style.transform = "scale(1)";
+      void c.offsetWidth; // reflow → старт с дальнего плана
+      c.style.transition = `transform ${dur}ms cubic-bezier(0.42, 0, 0.7, 1)`;
+      c.style.transform = `scale(${CAM_ZOOM})`;
+    } else {
+      c.style.transition = "transform 800ms cubic-bezier(0.3, 0, 0.2, 1)";
+      c.style.transform = "scale(1)";
+    }
+  }, [phase, throwSeq, throwSpeed]);
 
   const reloadBalance = useCallback(() => {
     fetchMe().then((m) => setBalanceNano(m.balance_nano)).catch(() => {});
@@ -257,7 +293,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
       const res = await basketThrow(nano);
       ctxRef.current = res;
       setThrowAnim(res.anim);
-      setThrowSpeed(autoRef.current ? AUTO_THROW_SPEED : THROW_SPEED); // скорость захвачена на старте
+      setThrowSpeed(autoRef.current ? AUTO_THROW_SPEED : THROW_SPEED);
       settledRef.current = false;
       setPhase("throwing");
       setThrowSeq((k) => k + 1);
@@ -268,15 +304,13 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
     } catch (e) {
       setPending(false);
       setPhase("idle");
-      setAuto(false); // ошибка → выключаем авто, чтобы не долбить ею
+      setAuto(false);
       setErr(e instanceof Error ? e.message : String(e));
       hapticNotify("error");
     }
   };
   shootRef.current = shoot;
 
-  // Авто-цикл: пока тумблер включён и хватает денег — бросаем сами. Из покоя (delay 0) и
-  // после каждого результата (короткая пауза). Стоп — денег не хватает или юзер выключил.
   useEffect(() => {
     if (!auto || busy) return;
     const nano = Math.round((Number(stake) || 0) * 1e9);
@@ -289,10 +323,12 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed left-0 top-0 z-50 w-full overflow-hidden text-white" style={{ height: "var(--app-h, 100dvh)", background: BG_BOTTOM }}>
       <div ref={clipRef} className="absolute inset-x-0 top-0 overflow-hidden" style={{ height: "var(--app-h, 100dvh)" }}>
-        <BasketCourt />
+        {/* зал + камера-наезд (origin у кольца) */}
+        <div ref={courtRef} className="pointer-events-none absolute inset-0 will-change-transform" style={{ transformOrigin: "50% 34%" }}>
+          <BasketCourt />
+        </div>
 
         <div className="relative z-10 flex h-full flex-col overflow-hidden">
-          {/* История (высота зарезервирована) */}
           <div className="px-4 pb-1" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/60 drop-shadow">{t("basket.history")}</div>
             <div className="flex min-h-[24px] items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -311,7 +347,6 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          {/* Сцена: мяч/кольцо по центру над площадкой */}
           <div className="flex flex-1 flex-col items-center justify-center overflow-hidden px-4">
             <div className="grid h-72 w-72 place-items-center drop-shadow-[0_10px_24px_rgba(0,0,0,0.55)]">
               {phase === "idle" ? (
@@ -354,8 +389,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          {/* Нижняя панель */}
-          <div className="border-t border-white/10 bg-[#100c08]/95 px-4 pb-3 pt-3 backdrop-blur-sm">
+          <div className="border-t border-white/10 bg-[#0b0e16]/95 px-4 pb-3 pt-3 backdrop-blur-sm">
             {err && <p className="mb-2 text-center text-xs text-rose-400">{err}</p>}
 
             <div className="mb-2 flex items-center justify-center gap-3 text-[11px] font-medium text-white/55">
@@ -397,7 +431,6 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
               ))}
             </div>
 
-            {/* Авто-броски */}
             <div className="mb-2 flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5">
               <span className="flex items-center gap-2 text-sm font-semibold text-white/80">
                 <svg viewBox="0 0 24 24" className="h-4 w-4 text-orange-300" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
