@@ -265,6 +265,85 @@ export async function diceRotate(clientSeed?: string): Promise<{
   return await r.json();
 }
 
+// ── Case opening (instant CS:GO-style game) ───────────────────────────────
+
+export type CasePrize = {
+  rarity: "grey" | "blue" | "purple" | "pink" | "red" | "gold";
+  mult_milli: number; // ×1000 (500 = 0.5×, 200000 = 200×)
+};
+
+export type CaseSpinRow = {
+  id: number;
+  nonce: number;
+  price_nano: number;
+  prize_index: number;
+  rarity: CasePrize["rarity"];
+  mult_milli: number;
+  payout_nano: number;
+  created_at: string;
+};
+
+export type CaseState = {
+  server_seed_hash: string;
+  client_seed: string;
+  nonce: number;
+  price_nano: number;
+  prizes: CasePrize[]; // reel tiers, low → high; weights stay server-side
+  recent: CaseSpinRow[];
+};
+
+export type CaseSpinResult = {
+  spin_id: number;
+  nonce: number;
+  prize_index: number;
+  rarity: CasePrize["rarity"];
+  mult_milli: number;
+  price_nano: number;
+  payout_nano: number;
+  balance_nano: number;
+  server_seed_hash: string;
+};
+
+// fetchCaseState returns the fairness commitment, the spin price, the prize table and
+// recent spins. Creates the seed on first call.
+export async function fetchCaseState(): Promise<CaseState> {
+  const r = await fetch(`${API_BASE}/api/case/state`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`case state ${r.status}`);
+  return (await r.json()) as CaseState;
+}
+
+// caseOpen plays one instant spin at the fixed case price. Returns the drawn prize and
+// the new balance. Throws with the server message (e.g. insufficient balance).
+export async function caseOpen(): Promise<CaseSpinResult> {
+  const r = await fetch(`${API_BASE}/api/case/open`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+  });
+  if (!r.ok) {
+    const e = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(e.error || `case open ${r.status}`);
+  }
+  return (await r.json()) as CaseSpinResult;
+}
+
+// caseRotate reveals the current server seed and commits a fresh one (resetting the
+// nonce), so the player can verify all spins drawn under the old seed.
+export async function caseRotate(clientSeed?: string): Promise<{
+  old_server_seed: string;
+  old_server_hash: string;
+  spun_nonce: number;
+  server_seed_hash: string;
+  client_seed: string;
+}> {
+  const r = await fetch(`${API_BASE}/api/case/rotate`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ client_seed: clientSeed ?? "" }),
+  });
+  if (!r.ok) throw new Error(`case rotate ${r.status}`);
+  return await r.json();
+}
+
 // fetchMyBets returns the user's bets (newest first), with market + outcome titles.
 export async function fetchMyBets(): Promise<Bet[]> {
   const r = await fetch(`${API_BASE}/api/bets`, { headers: authHeaders() });
