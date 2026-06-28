@@ -38,6 +38,22 @@ func TestOutcomeTable(t *testing.T) {
 	if len(Scores()) != 2 {
 		t.Errorf("Scores() len=%d, want 2 winning tiers", len(Scores()))
 	}
+	// The three misses must be EQUAL by weight (operator requirement).
+	var missW []int64
+	for _, o := range Outcomes {
+		if o.MultMilli == 0 {
+			missW = append(missW, o.Weight)
+		}
+	}
+	if len(missW) != 3 {
+		t.Fatalf("want 3 miss outcomes, got %d", len(missW))
+	}
+	for _, w := range missW {
+		if w != missW[0] {
+			t.Errorf("miss weights not equal: %v", missW)
+			break
+		}
+	}
 }
 
 // TestDrawDeterministic: same (seed, client, nonce) → same (roll, index); index valid.

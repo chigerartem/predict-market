@@ -30,21 +30,22 @@ type Outcome struct {
 // Outcomes — the five landings by rarity. Designed for RTP 90% (house edge 10%) with a
 // ~50% score chance: Σ(weight/total · mult) = 0.90 over the 10000 total weight.
 //
-//	outcome           mult   weight   chance   contribution
-//	miss (off)        0×      2500    25%       0.000
-//	miss (net)        0×      1700    17%       0.000
-//	miss (rim)        0×       800     8%       0.000
-//	score (regular)   1.5×    4400    44%       0.660
-//	score (swish)     4×       600     6%       0.240   → Σ = 0.900, score chance 50%
+//	outcome           mult   weight   chance    contribution
+//	miss (off)        0×      5000    16.67%     0.000
+//	miss (net)        0×      5000    16.67%     0.000
+//	miss (rim)        0×      5000    16.67%     0.000
+//	score (regular)   1.5×   13200    44%        0.660
+//	score (swish)     4×      1800     6%        0.240   → Σ = 0.900, score chance 50%
 //
-// Weights sum to 10000. Misses map to the three distinct miss stickers (val 1/2/3); the
-// regular score to the off-the-rim make (val 4) and the rare swish to the clean make (val 5).
+// Weights sum to 30000; the three misses are deliberately EQUAL (16.67% each). Misses map
+// to the three distinct miss stickers (val 1/2/3); the regular score to the off-the-rim
+// make (val 4) and the rare swish to the clean make (val 5).
 var Outcomes = []Outcome{
-	{Anim: "basket-miss-2", MultMilli: 0, Weight: 2500},   // мимо (val 1)
-	{Anim: "basket-hit-2", MultMilli: 1500, Weight: 4400}, // попадание, 1.5× (val 4)
-	{Anim: "basket-miss-1", MultMilli: 0, Weight: 1700},   // пустая сетка (val 2)
-	{Anim: "basket-miss-3", MultMilli: 0, Weight: 800},    // от кольца (val 3)
-	{Anim: "basket-hit-1", MultMilli: 4000, Weight: 600},  // чистый свиш, 4× (val 5)
+	{Anim: "basket-miss-2", MultMilli: 0, Weight: 5000},    // мимо (val 1)
+	{Anim: "basket-hit-2", MultMilli: 1500, Weight: 13200}, // попадание, 1.5× (val 4)
+	{Anim: "basket-miss-1", MultMilli: 0, Weight: 5000},    // пустая сетка (val 2)
+	{Anim: "basket-miss-3", MultMilli: 0, Weight: 5000},    // от кольца (val 3)
+	{Anim: "basket-hit-1", MultMilli: 4000, Weight: 1800},  // чистый свиш, 4× (val 5)
 }
 
 // TotalWeight is the sum of all outcome weights (the draw is modulo this).
