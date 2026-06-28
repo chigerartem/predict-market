@@ -34,10 +34,23 @@ type Market struct {
 	Source            string
 	Title             string
 	Category          string
-	Status            string
-	CloseTime         *time.Time
-	ResolvedOutcomeID *int64
-	Outcomes          []Outcome
+	Status             string
+	CloseTime          *time.Time
+	GameStart          *time.Time
+	ImageURL           string
+	Description        string
+	ContextDescription string
+	ResolvedOutcomeID  *int64
+	Outcomes           []Outcome
+}
+
+// ExternalMeta is optional per-market metadata mirrored from the source.
+type ExternalMeta struct {
+	ImageURL    string
+	Volume24h   float64
+	Description string     // resolution criteria
+	Context     string     // human-readable preview / analysis
+	GameStart   *time.Time // scheduled match kickoff, if a sports match
 }
 
 // CreateMarket creates a market with its outcomes (admin action).
@@ -87,7 +100,7 @@ func CreateMarket(ctx context.Context, pool *pgxpool.Pool, title, category strin
 // the market and outcomes. Later runs: refreshes the title, close time, and each
 // outcome's odds (matched by sort_order). Bets keep the odds they were placed at,
 // so refreshing market odds never disturbs existing bets.
-func UpsertExternal(ctx context.Context, pool *pgxpool.Pool, source, sourceID, title, category string, closeTime *time.Time, outs []OutcomeInput) error {
+func UpsertExternal(ctx context.Context, pool *pgxpool.Pool, source, sourceID, title, category string, closeTime *time.Time, meta ExternalMeta, outs []OutcomeInput) error {
 	if len(outs) == 0 {
 		return errors.New("markets: no outcomes")
 	}
@@ -103,10 +116,10 @@ func UpsertExternal(ctx context.Context, pool *pgxpool.Pool, source, sourceID, t
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO markets (source, source_id, title, category, close_time)
-			 VALUES ($1, $2, $3, NULLIF($4, ''), $5)
+			`INSERT INTO markets (source, source_id, title, category, close_time, image_url, volume_24h, description, context_description, game_start_time)
+			 VALUES ($1, $2, $3, NULLIF($4, ''), $5, NULLIF($6, ''), $7, NULLIF($8, ''), NULLIF($9, ''), $10)
 			 RETURNING id`,
-			source, sourceID, title, category, closeTime).Scan(&marketID); err != nil {
+			source, sourceID, title, category, closeTime, meta.ImageURL, meta.Volume24h, meta.Description, meta.Context, meta.GameStart).Scan(&marketID); err != nil {
 			return err
 		}
 		for i, o := range outs {
@@ -119,8 +132,12 @@ func UpsertExternal(ctx context.Context, pool *pgxpool.Pool, source, sourceID, t
 		}
 	case err == nil:
 		if _, err := tx.Exec(ctx,
-			`UPDATE markets SET title = $2, category = NULLIF($3, ''), close_time = $4, updated_at = now() WHERE id = $1`,
-			marketID, title, category, closeTime); err != nil {
+			`UPDATE markets SET title = $2, category = NULLIF($3, ''), close_time = $4,
+			        image_url = COALESCE(NULLIF($5, ''), image_url), volume_24h = $6,
+			        description = COALESCE(NULLIF($7, ''), description),
+			        context_description = COALESCE(NULLIF($8, ''), context_description),
+			        game_start_time = $9, updated_at = now() WHERE id = $1`,
+			marketID, title, category, closeTime, meta.ImageURL, meta.Volume24h, meta.Description, meta.Context, meta.GameStart); err != nil {
 			return err
 		}
 		for i, o := range outs {
@@ -166,9 +183,9 @@ func CloseStaleExternal(ctx context.Context, pool *pgxpool.Pool, source string, 
 func GetMarket(ctx context.Context, pool *pgxpool.Pool, id int64) (Market, error) {
 	var m Market
 	if err := pool.QueryRow(ctx,
-		`SELECT id, source, title, COALESCE(category, ''), status, close_time, resolved_outcome_id
+		`SELECT id, source, title, COALESCE(category, ''), status, close_time, COALESCE(image_url, ''), resolved_outcome_id
 		   FROM markets WHERE id = $1`, id).Scan(
-		&m.ID, &m.Source, &m.Title, &m.Category, &m.Status, &m.CloseTime, &m.ResolvedOutcomeID); err != nil {
+		&m.ID, &m.Source, &m.Title, &m.Category, &m.Status, &m.CloseTime, &m.ImageURL, &m.ResolvedOutcomeID); err != nil {
 		return Market{}, err
 	}
 
@@ -190,11 +207,22 @@ func GetMarket(ctx context.Context, pool *pgxpool.Pool, id int64) (Market, error
 	return m, rows.Err()
 }
 
+// maxSharedImage: an image reused by more than this many open markets is treated as
+// a generic Polymarket event placeholder (e.g. one World Cup image across every match
+// market) and hidden from the feed — better no image than the same icon repeated down
+// the list. Market-specific images (flags, logos) stay.
+const maxSharedImage = 2
+
 // ListOpen returns markets currently open for betting, each with its outcomes.
 func ListOpen(ctx context.Context, pool *pgxpool.Pool) ([]Market, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT id, source, title, COALESCE(category, ''), status, close_time
-		   FROM markets WHERE status = 'OPEN' ORDER BY created_at DESC`)
+		`SELECT id, source, title, COALESCE(category, ''), status, close_time, game_start_time,
+		        COALESCE(description, ''), COALESCE(context_description, ''),
+		        CASE WHEN image_url IS NULL OR image_url = '' THEN ''
+		             WHEN count(*) OVER (PARTITION BY image_url) > $1 THEN ''
+		             ELSE image_url END
+		   FROM markets WHERE status = 'OPEN'
+		   ORDER BY volume_24h DESC NULLS LAST, created_at DESC`, maxSharedImage)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +233,8 @@ func ListOpen(ctx context.Context, pool *pgxpool.Pool) ([]Market, error) {
 	var ids []int64
 	for rows.Next() {
 		var m Market
-		if err := rows.Scan(&m.ID, &m.Source, &m.Title, &m.Category, &m.Status, &m.CloseTime); err != nil {
+		if err := rows.Scan(&m.ID, &m.Source, &m.Title, &m.Category, &m.Status, &m.CloseTime,
+			&m.GameStart, &m.Description, &m.ContextDescription, &m.ImageURL); err != nil {
 			return nil, err
 		}
 		idx[m.ID] = len(list)

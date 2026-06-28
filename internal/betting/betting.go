@@ -41,6 +41,13 @@ type Bet struct {
 	PlacedAt     time.Time
 	MarketTitle  string
 	OutcomeTitle string
+	// Детали рынка для экрана ставки (как в ленте): картинка, «как резолвится»,
+	// превью события, время начала/закрытия.
+	ImageURL           string
+	Description        string
+	ContextDescription string
+	CloseTime          *time.Time
+	GameStart          *time.Time
 }
 
 // payoutNano = floor(stake * oddsMilli / 1000), computed in big.Int to avoid overflow.
@@ -384,7 +391,14 @@ func VoidMarket(ctx context.Context, pool *pgxpool.Pool, marketID int64) error {
 func ListUserBets(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]Bet, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT b.id, b.user_id, b.market_id, b.outcome_id, b.stake_nano, b.odds_milli,
-		        b.payout_nano, b.status, b.placed_at, m.title, o.title
+		        b.payout_nano, b.status, b.placed_at, m.title, o.title,
+		        -- Прячем «общую» картинку Polymarket (один генерик-мячик на десятки
+		        -- рынков) — как лента: если image_url у >2 рынков, отдаём пусто.
+		        CASE WHEN m.image_url IS NULL OR m.image_url = '' THEN ''
+		             WHEN (SELECT count(*) FROM markets mi WHERE mi.image_url = m.image_url) > 2 THEN ''
+		             ELSE m.image_url END,
+		        COALESCE(m.description, ''),
+		        COALESCE(m.context_description, ''), m.close_time, m.game_start_time
 		   FROM bets b
 		   JOIN markets m ON m.id = b.market_id
 		   JOIN outcomes o ON o.id = b.outcome_id
@@ -398,7 +412,8 @@ func ListUserBets(ctx context.Context, pool *pgxpool.Pool, userID int64) ([]Bet,
 		var b Bet
 		if err := rows.Scan(&b.ID, &b.UserID, &b.MarketID, &b.OutcomeID,
 			&b.StakeNano, &b.OddsMilli, &b.PayoutNano, &b.Status, &b.PlacedAt,
-			&b.MarketTitle, &b.OutcomeTitle); err != nil {
+			&b.MarketTitle, &b.OutcomeTitle,
+			&b.ImageURL, &b.Description, &b.ContextDescription, &b.CloseTime, &b.GameStart); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
