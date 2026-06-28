@@ -24,18 +24,16 @@ var (
 	ErrHouseCantCover = errors.New("basket: house can't cover payout")
 )
 
-// Config tunes the economics. A score pays stake × MultMilli(EdgeBp, HitProbBp); the
-// edge is baked into that multiplier. Amounts are nano-TON; probabilities basis points.
+// Config tunes the stake bounds. The outcomes (animations, multipliers, weights) and the
+// edge live in the prize table in fair.go. Amounts are nano-TON.
 type Config struct {
-	HitProbBp    int64 // score chance, e.g. 5000 = 50%
-	EdgeBp       int64 // house edge, e.g. 600 = 6%
 	MinStakeNano int64
 	MaxStakeNano int64 // 0 = no cap
 }
 
-// DefaultConfig: 50% score chance, 6% edge (→ 1.88× on a hit), min stake 0.1 TON, no max.
+// DefaultConfig: min stake 0.1 TON, no max (the real cap is the player's balance).
 func DefaultConfig() Config {
-	return Config{HitProbBp: 5000, EdgeBp: 600, MinStakeNano: 100_000_000, MaxStakeNano: 0}
+	return Config{MinStakeNano: 100_000_000, MaxStakeNano: 0}
 }
 
 // Store persists per-user seeds and throws and books the money through the ledger.
@@ -59,11 +57,8 @@ func NewStore(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Store, erro
 	return &Store{pool: pool, cfg: cfg, escrow: escrow, treasury: treasury}, nil
 }
 
-// Config exposes the economics so the API can hand them to the client.
+// Config exposes the stake bounds.
 func (s *Store) Config() Config { return s.cfg }
-
-// MultMilli is the current win multiplier (×1000).
-func (s *Store) MultMilli() int64 { return MultMilli(s.cfg.EdgeBp, s.cfg.HitProbBp) }
 
 // payoutNano = floor(stake * multMilli / 1000), in big.Int to avoid overflow.
 func payoutNano(stakeNano, multMilli int64) int64 {
@@ -91,6 +86,8 @@ type ThrowResult struct {
 	ThrowID        int64
 	Nonce          int64
 	Roll           int
+	OutcomeIndex   int
+	Anim           string // lottie the client plays for this landing
 	Hit            bool
 	MultMilli      int64
 	StakeNano      int64
@@ -135,19 +132,19 @@ func (s *Store) Throw(ctx context.Context, userID, stakeNano int64) (ThrowResult
 	}
 	hash := SeedHash(serverSeed)
 
-	roll := Draw(serverSeed, clientSeed, nonce)
-	hit := int64(roll) < s.cfg.HitProbBp
-	mult := s.MultMilli()
+	roll, idx := Draw(serverSeed, clientSeed, nonce)
+	out := Outcomes[idx]
+	hit := out.MultMilli > 0
 	var payout int64
 	if hit {
-		payout = payoutNano(stakeNano, mult)
+		payout = payoutNano(stakeNano, out.MultMilli)
 	}
 
 	var throwID int64
 	if err := tx.QueryRow(ctx,
 		`INSERT INTO basket_throws (user_id, nonce, stake_nano, roll, hit, mult_milli, payout_nano)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		userID, nonce, stakeNano, roll, hit, mult, payout).
+		userID, nonce, stakeNano, roll, hit, out.MultMilli, payout).
 		Scan(&throwID); err != nil {
 		return ThrowResult{}, err
 	}
@@ -169,8 +166,8 @@ func (s *Store) Throw(ctx context.Context, userID, stakeNano int64) (ThrowResult
 		return ThrowResult{}, err
 	}
 
-	// settle: win pays stake+profit out (escrow + treasury → user); miss sends the stake
-	// to the house (escrow → treasury).
+	// settle: a score pays stake+profit out (escrow + treasury → user); a miss sends the
+	// stake to the house (escrow → treasury).
 	var entries []ledger.Entry
 	kindStr := "basket_miss"
 	if hit {
@@ -218,8 +215,9 @@ func (s *Store) Throw(ctx context.Context, userID, stakeNano int64) (ThrowResult
 		return ThrowResult{}, err
 	}
 	return ThrowResult{
-		ThrowID: throwID, Nonce: nonce, Roll: roll, Hit: hit, MultMilli: mult,
-		StakeNano: stakeNano, PayoutNano: payout, BalanceNano: bal, ServerSeedHash: hash,
+		ThrowID: throwID, Nonce: nonce, Roll: roll, OutcomeIndex: idx, Anim: out.Anim,
+		Hit: hit, MultMilli: out.MultMilli, StakeNano: stakeNano, PayoutNano: payout,
+		BalanceNano: bal, ServerSeedHash: hash,
 	}, nil
 }
 
@@ -229,8 +227,7 @@ type State struct {
 	ClientSeed     string
 	Nonce          int64
 	HitProbBp      int64
-	EdgeBp         int64
-	MultMilli      int64
+	Scores         []Score // winning tiers (mult + chance), low → high
 	MinStakeNano   int64
 	MaxStakeNano   int64
 	Recent         []ThrowRow
@@ -248,14 +245,14 @@ type ThrowRow struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// State returns the user's commitment, the economics (chance, edge, multiplier), stake
+// State returns the user's commitment, the economics (score chance, winning tiers), stake
 // bounds and recent throws — creating the seed on first use.
 func (s *Store) State(ctx context.Context, userID int64) (State, error) {
 	if err := s.ensureSeed(ctx, userID); err != nil {
 		return State{}, err
 	}
 	st := State{
-		HitProbBp: s.cfg.HitProbBp, EdgeBp: s.cfg.EdgeBp, MultMilli: s.MultMilli(),
+		HitProbBp: HitProbBp(), Scores: Scores(),
 		MinStakeNano: s.cfg.MinStakeNano, MaxStakeNano: s.cfg.MaxStakeNano,
 	}
 	if err := s.pool.QueryRow(ctx,

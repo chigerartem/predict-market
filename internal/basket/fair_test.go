@@ -5,57 +5,78 @@ import (
 	"testing"
 )
 
-// TestMultAndRTP pins the economics: the default 50% chance at 6% edge pays 1.88×, and
-// RTP = chance × multiplier = 1 − edge for a range of configs.
-func TestMultAndRTP(t *testing.T) {
-	if got := MultMilli(600, 5000); got != 1880 {
-		t.Fatalf("MultMilli(600,5000)=%d, want 1880 (1.88×)", got)
-	}
-	cases := []struct{ edgeBp, probBp int64 }{
-		{600, 5000}, {600, 3200}, {700, 5500}, {500, 4000},
-	}
-	for _, c := range cases {
-		mult := MultMilli(c.edgeBp, c.probBp)
-		rtp := (float64(c.probBp) / 10000) * (float64(mult) / 1000)
-		want := float64(10000-c.edgeBp) / 10000
-		// floor in MultMilli can shave a hair; allow a small slack below `want`.
-		if rtp > want+1e-9 || rtp < want-0.002 {
-			t.Errorf("edge %d prob %d: RTP=%.5f, want ≈%.5f (mult %d)", c.edgeBp, c.probBp, rtp, want, mult)
+// TestOutcomeTable pins the economics: weights sum to TotalWeight, RTP is 90% and the
+// score chance is 50%. The canary if someone re-tunes the table.
+func TestOutcomeTable(t *testing.T) {
+	var totalW, weightedMilli, scoreW int64
+	for _, o := range Outcomes {
+		if o.Weight <= 0 {
+			t.Fatalf("outcome %+v has non-positive weight", o)
 		}
-		if rtp >= 1.0 {
-			t.Errorf("edge %d prob %d: RTP=%.4f ≥ 1 — house loses", c.edgeBp, c.probBp, rtp)
+		totalW += o.Weight
+		weightedMilli += o.Weight * o.MultMilli
+		if o.MultMilli > 0 {
+			scoreW += o.Weight
 		}
+	}
+	if totalW != TotalWeight {
+		t.Fatalf("TotalWeight=%d but weights sum to %d", TotalWeight, totalW)
+	}
+	rtp := float64(weightedMilli) / float64(totalW*1000)
+	if math.Abs(rtp-0.90) > 1e-9 {
+		t.Fatalf("RTP=%.6f, want 0.90 (edge 10%%)", rtp)
+	}
+	if rtp >= 1.0 {
+		t.Fatalf("RTP=%.4f ≥ 1 — house loses", rtp)
+	}
+	if hp := HitProbBp(); hp != 5000 {
+		t.Errorf("HitProbBp=%d, want 5000 (50%%)", hp)
+	}
+	if got := scoreW * 10000 / totalW; got != 5000 {
+		t.Errorf("score weight share=%d bp, want 5000", got)
+	}
+	if len(Scores()) != 2 {
+		t.Errorf("Scores() len=%d, want 2 winning tiers", len(Scores()))
 	}
 }
 
-// TestDrawDeterministic: same (seed, client, nonce) → same roll, always in range.
+// TestDrawDeterministic: same (seed, client, nonce) → same (roll, index); index valid.
 func TestDrawDeterministic(t *testing.T) {
 	seed := []byte("basket-server-seed-fixed-test!!!")
 	for nonce := int64(1); nonce <= 1000; nonce++ {
-		a := Draw(seed, "client", nonce)
-		if a != Draw(seed, "client", nonce) {
-			t.Fatalf("nonce %d: non-deterministic", nonce)
+		r1, i1 := Draw(seed, "client", nonce)
+		r2, i2 := Draw(seed, "client", nonce)
+		if r1 != r2 || i1 != i2 {
+			t.Fatalf("nonce %d: non-deterministic (%d,%d) != (%d,%d)", nonce, r1, i1, r2, i2)
 		}
-		if a < 0 || a >= RollRange {
-			t.Fatalf("nonce %d: roll %d out of range", nonce, a)
+		if i1 < 0 || i1 >= len(Outcomes) || r1 < 0 || r1 >= int(TotalWeight) {
+			t.Fatalf("nonce %d: out of range roll=%d idx=%d", nonce, r1, i1)
 		}
 	}
 }
 
-// TestHitRate: over many throws the empirical score rate tracks HitProbBp (validates the
-// uniform draw + threshold).
-func TestHitRate(t *testing.T) {
+// TestDrawDistribution: empirical outcome frequencies track the weights, and the overall
+// score rate is ≈ 50%.
+func TestDrawDistribution(t *testing.T) {
 	seed := []byte("basket-distribution-seed-test!!!")
-	const n = 200_000
-	const probBp = 5000
+	const n = 300_000
+	counts := make([]int, len(Outcomes))
 	hits := 0
 	for nonce := int64(1); nonce <= n; nonce++ {
-		if Draw(seed, "client", nonce) < probBp {
+		_, idx := Draw(seed, "client", nonce)
+		counts[idx]++
+		if Outcomes[idx].MultMilli > 0 {
 			hits++
 		}
 	}
-	rate := float64(hits) / n
-	if math.Abs(rate-0.50) > 0.01 {
-		t.Errorf("hit rate %.4f, want ≈0.50 (prob %d bp)", rate, probBp)
+	for i, o := range Outcomes {
+		expected := float64(o.Weight) / float64(TotalWeight)
+		got := float64(counts[i]) / float64(n)
+		if rel := math.Abs(got-expected) / expected; rel > 0.08 {
+			t.Errorf("outcome %d (%s): freq %.4f vs expected %.4f (%.1f%% off)", i, o.Anim, got, expected, rel*100)
+		}
+	}
+	if rate := float64(hits) / n; math.Abs(rate-0.50) > 0.01 {
+		t.Errorf("score rate %.4f, want ≈0.50", rate)
 	}
 }

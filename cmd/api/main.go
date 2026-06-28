@@ -186,18 +186,15 @@ func main() {
 	// HOUSE_TREASURY (allowed to go negative, migration 0014).
 	if envBool("BASKET_ENABLED", true) {
 		cfg := basket.DefaultConfig()
-		if v := envInt("BASKET_HIT_PROB_BP", 0); v > 0 {
-			cfg.HitProbBp = v
-		}
-		if v := envInt("BASKET_EDGE_BP", 0); v > 0 {
-			cfg.EdgeBp = v
+		if v := envInt("BASKET_MAX_STAKE_NANO", 0); v > 0 {
+			cfg.MaxStakeNano = v
 		}
 		store, err := basket.NewStore(ctx, pool, cfg)
 		if err != nil {
 			log.Printf("basket disabled: %v", err)
 		} else {
 			srv.SetBasket(store)
-			log.Printf("basket enabled (chance %d%%, edge %dbp, mult %d)", cfg.HitProbBp/100, cfg.EdgeBp, store.MultMilli())
+			log.Printf("basket enabled (score chance %d%%, %d outcomes)", basket.HitProbBp()/100, len(basket.Outcomes))
 		}
 	}
 

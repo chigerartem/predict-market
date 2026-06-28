@@ -722,8 +722,7 @@ func (s *Server) handleBasketState(w http.ResponseWriter, r *http.Request, userI
 		ClientSeed:     st.ClientSeed,
 		Nonce:          st.Nonce,
 		HitProbBp:      st.HitProbBp,
-		EdgeBp:         st.EdgeBp,
-		MultMilli:      st.MultMilli,
+		Scores:         st.Scores,
 		MinStakeNano:   st.MinStakeNano,
 		MaxStakeNano:   st.MaxStakeNano,
 		Recent:         st.Recent,
@@ -764,6 +763,8 @@ func (s *Server) handleBasketThrow(w http.ResponseWriter, r *http.Request, userI
 		ThrowID:        res.ThrowID,
 		Nonce:          res.Nonce,
 		Roll:           res.Roll,
+		OutcomeIndex:   res.OutcomeIndex,
+		Anim:           res.Anim,
 		Hit:            res.Hit,
 		MultMilli:      res.MultMilli,
 		StakeNano:      res.StakeNano,
@@ -953,9 +954,8 @@ type basketStateDTO struct {
 	ServerSeedHash string            `json:"server_seed_hash"`
 	ClientSeed     string            `json:"client_seed"`
 	Nonce          int64             `json:"nonce"`
-	HitProbBp      int64             `json:"hit_prob_bp"` // score chance, 5000 = 50%
-	EdgeBp         int64             `json:"edge_bp"`
-	MultMilli      int64             `json:"mult_milli"` // win multiplier ×1000
+	HitProbBp      int64             `json:"hit_prob_bp"` // total score chance, 5000 = 50%
+	Scores         []basket.Score    `json:"scores"`      // winning tiers (mult + chance)
 	MinStakeNano   int64             `json:"min_stake_nano"`
 	MaxStakeNano   int64             `json:"max_stake_nano"`
 	Recent         []basket.ThrowRow `json:"recent"`
@@ -965,6 +965,8 @@ type basketThrowDTO struct {
 	ThrowID        int64  `json:"throw_id"`
 	Nonce          int64  `json:"nonce"`
 	Roll           int    `json:"roll"`
+	OutcomeIndex   int    `json:"outcome_index"`
+	Anim           string `json:"anim"` // lottie to play for this landing
 	Hit            bool   `json:"hit"`
 	MultMilli      int64  `json:"mult_milli"`
 	StakeNano      int64  `json:"stake_nano"`
