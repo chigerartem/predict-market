@@ -11,6 +11,7 @@ import lottie from "lottie-web";
 // грань), а не на первом (кубик в полёте) → покоящийся кубик показывает выпавшее число.
 export default function Lottie({
   src,
+  animationData,
   className,
   loop = true,
   autoplay = true,
@@ -19,6 +20,7 @@ export default function Lottie({
   speed = 1,
 }: {
   src: string;
+  animationData?: object; // разобранные данные (из lottieCache) → рендер без сети, мгновенно
   className?: string;
   loop?: boolean;
   autoplay?: boolean;
@@ -37,13 +39,11 @@ export default function Lottie({
     const el = ref.current;
     if (!el) return;
     if (freeze === "last") setRevealed(false); // src сменился → снова прячем до постановки кадра
-    const anim = lottie.loadAnimation({
-      container: el,
-      renderer: "svg",
-      loop,
-      autoplay,
-      path: src,
-    });
+    // animationData (из кэша) → строится синхронно, без сетевой загрузки → грань стоит
+    // сразу. Иначе грузим по path (асинхронно).
+    const anim = animationData
+      ? lottie.loadAnimation({ container: el, renderer: "svg", loop, autoplay, animationData })
+      : lottie.loadAnimation({ container: el, renderer: "svg", loop, autoplay, path: src });
     if (speed !== 1) anim.setSpeed(speed);
     const handleComplete = () => cbRef.current?.();
     anim.addEventListener("complete", handleComplete);
@@ -60,6 +60,6 @@ export default function Lottie({
       if (handleLoaded) anim.removeEventListener("DOMLoaded", handleLoaded);
       anim.destroy();
     };
-  }, [src, loop, autoplay, freeze, speed]);
+  }, [src, animationData, loop, autoplay, freeze, speed]);
   return <div ref={ref} className={className} aria-hidden style={revealed ? undefined : { opacity: 0 }} />;
 }

@@ -360,7 +360,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
           {/* История дропов */}
           <div className="px-4 pb-1" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">{t("case.history")}</div>
-            <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex min-h-[24px] items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {recent.length === 0 && <span className="text-xs text-white/30">{t("case.noSpins")}</span>}
               {recent.map((r) => (
                 <span key={r.id} className={"flex shrink-0 items-center rounded-md px-1.5 py-1 text-xs font-bold tabular-nums " + RARITY[r.rarity].chip}>

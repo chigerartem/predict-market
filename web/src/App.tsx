@@ -11,6 +11,7 @@ import Profile from "./tabs/Profile";
 import Onboarding from "./components/Onboarding";
 import PixelGround from "./components/PixelGround";
 import { useT, type TKey } from "./i18n";
+import { prefetchLottie } from "./lottieCache";
 
 type Tab = "home" | "bets" | "games" | "profile";
 type IconFC = (p: SVGProps<SVGSVGElement>) => JSX.Element;
@@ -206,6 +207,11 @@ export default function App() {
     for (const f of ["onb-predict", "onb-calc", "onb-connect", "onb-start", "money", "batman-mask", "gift", "star", "rocket", "gift-bee", "gift-corgi", "gift-capybara"]) {
       fetch(`/lottie/${f}.json`).catch(() => {});
     }
+    // Грани покоя кубиков (dice-1, dice-6) — парсим и кэшируем как animationData, чтобы
+    // при входе в Кости они стояли МГНОВЕННО (без подгрузки/мерцания). Грани броска
+    // грузятся по тапу (это действие). Файлы тяжёлые ~300KB — кэшируем только две.
+    prefetchLottie("dice-1");
+    prefetchLottie("dice-6");
     // Эмодзи-дождь Games: декодируем PNG заранее (Image.decode), чтобы первый заход
     // на вкладку не тормозил на декоде сотен тайлов.
     for (const f of ["pumpkin", "cat"]) {

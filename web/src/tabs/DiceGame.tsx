@@ -4,6 +4,7 @@ import { fmtTon } from "../format";
 import { useT } from "../i18n";
 import Lottie from "../components/Lottie";
 import TonIcon from "../components/TonIcon";
+import { getLottieData } from "../lottieCache";
 
 // «Кости» — мгновенная игра на два кубика. В отличие от Ракеты тут нет общего раунда
 // и SSE: тап «Бросить» → один POST, сервер кидает кубики (provably-fair) и сразу
@@ -331,7 +332,7 @@ export default function DiceGame({ onClose }: { onClose: () => void }) {
             {/* История последних бросков */}
             <div className="px-4 pb-1" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">{t("dice.history")}</div>
-              <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex min-h-[26px] items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {recent.length === 0 && <span className="text-xs text-white/30">{t("dice.noRolls")}</span>}
                 {recent.map((r) => (
                   <span
@@ -363,6 +364,7 @@ export default function DiceGame({ onClose }: { onClose: () => void }) {
                       <Lottie
                         key={`idle-${dice[i]}-${i}`}
                         src={`/lottie/dice-${dice[i]}.json`}
+                        animationData={getLottieData(`dice-${dice[i]}`)}
                         className="h-32 w-32"
                         loop={false}
                         autoplay={false}
