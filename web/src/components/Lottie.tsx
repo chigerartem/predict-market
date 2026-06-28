@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import lottie from "lottie-web";
 
 // Тонкая обёртка над lottie-web: грузит JSON-анимацию из /public/lottie и крутит её.
@@ -18,6 +18,7 @@ export default function Lottie({
   onComplete,
   onFrame,
   freeze,
+  style,
   speed = 1,
 }: {
   src: string;
@@ -27,7 +28,8 @@ export default function Lottie({
   autoplay?: boolean;
   onComplete?: () => void;
   onFrame?: (progress: number) => void; // прогресс 0..1 на каждом кадре (для синхро-камеры)
-  freeze?: "last";
+  freeze?: "last" | number; // заморозить на ПОСЛЕДНЕМ или на ЗАДАННОМ кадре (статичная иконка)
+  style?: CSSProperties; // напр. transform для центровки контента иконки
   speed?: number; // множитель скорости проигрывания (1 = норма; >1 быстрее, для авто-режима)
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -38,11 +40,11 @@ export default function Lottie({
   // freeze="last": прячем контейнер, пока не встанем на последний кадр. Иначе до события
   // DOMLoaded lottie показывает кадр 0 (для кубиков — «кубик в полёте»), и при каждой
   // смене src (грани) это мелькает как лишняя прокрутка. Скрыт → виден ровно гранью.
-  const [revealed, setRevealed] = useState(freeze !== "last");
-  useEffect(() => {
+  const [revealed, setRevealed] = useState(freeze === undefined);
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (freeze === "last") setRevealed(false); // src сменился → снова прячем до постановки кадра
+    if (freeze !== undefined) setRevealed(false); // src сменился → снова прячем до постановки кадра
     // animationData (из кэша) → строится синхронно, без сетевой загрузки → грань стоит
     // сразу. Иначе грузим по path (асинхронно).
     const anim = animationData
@@ -57,9 +59,10 @@ export default function Lottie({
     };
     anim.addEventListener("enterFrame", handleFrame);
     let handleLoaded: (() => void) | undefined;
-    if (freeze === "last") {
+    if (freeze !== undefined) {
       handleLoaded = () => {
-        anim.goToAndStop(Math.max(0, Math.round(anim.totalFrames) - 1), true);
+        const ff = freeze === "last" ? Math.round(anim.totalFrames) - 1 : freeze;
+        anim.goToAndStop(Math.max(0, ff), true);
         setRevealed(true);
       };
       anim.addEventListener("DOMLoaded", handleLoaded);
@@ -71,5 +74,5 @@ export default function Lottie({
       anim.destroy();
     };
   }, [src, animationData, loop, autoplay, freeze, speed]);
-  return <div ref={ref} className={className} aria-hidden style={revealed ? undefined : { opacity: 0 }} />;
+  return <div ref={ref} className={className} aria-hidden style={revealed ? style : { ...style, opacity: 0 }} />;
 }

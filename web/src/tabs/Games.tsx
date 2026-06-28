@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useT, type TKey } from "../i18n";
 import Lottie from "../components/Lottie";
 import RocketGame from "./RocketGame";
@@ -14,42 +14,48 @@ type Game = {
   id: string;
   titleKey: TKey;
   descKey: TKey;
-  icon: ReactNode;
-  tint: string;
+  iconSrc: string;
+  iconFrame: number;        // кадр заморозки → чистая статичная иконка
+  iconStyle: CSSProperties; // transform: центровка контента иконки (замерено по bbox кадра)
+  tint: string;             // градиент карточки (контраст к доминирующему цвету иконки)
   ready: boolean;
 };
 
+// Цвета карточек — КОМПЛЕМЕНТАРНЫ цвету иконки (цветовой круг), чтобы иконка не сливалась:
+// ракета (красно-оранж) → синяя; кубик (белый) → зелёная (казино-фетр); подарок (синий) →
+// золото; мяч (оранж) → фиолетовая. iconStyle центрирует контент (у кубика/подарка он смещён
+// вниз в своём кадре — отсюда было «кубик внизу»).
 const GAMES: Game[] = [
   {
     id: "rocket",
     titleKey: "games.rocketTitle",
     descKey: "games.rocketDesc",
-    icon: <Lottie src="/lottie/rocket.json" className="h-full w-full" />,
-    tint: "bg-gradient-to-br from-[#ff6a3d] to-[#e01e5a] shadow-rose-600/40",
+    iconSrc: "/lottie/rocket.json", iconFrame: 120, iconStyle: { transform: "translate(2.7%, 5.1%) scale(1.09)" },
+    tint: "bg-gradient-to-br from-[#3b82f6] to-[#1d4ed8] shadow-blue-700/40",
     ready: true,
   },
   {
     id: "dice",
     titleKey: "games.diceTitle",
     descKey: "games.diceDesc",
-    icon: <Lottie src="/lottie/dice-6.json" className="h-full w-full" />,
-    tint: "bg-gradient-to-br from-[#f5a623] to-[#e8590c] shadow-orange-600/40",
+    iconSrc: "/lottie/dice-6.json", iconFrame: 179, iconStyle: { transform: "translateY(-28.5%) scale(1.58)" },
+    tint: "bg-gradient-to-br from-[#22c55e] to-[#15803d] shadow-green-700/40",
     ready: true,
   },
   {
     id: "case",
     titleKey: "games.caseTitle",
     descKey: "games.caseDesc",
-    icon: <Lottie src="/lottie/gift.json" className="h-full w-full" />,
-    tint: "bg-gradient-to-br from-[#8b5cf6] to-[#d946ef] shadow-fuchsia-600/40",
+    iconSrc: "/lottie/gift.json", iconFrame: 90, iconStyle: { transform: "translate(0.6%, -14.5%) scale(1.19)" },
+    tint: "bg-gradient-to-br from-[#fbbf24] to-[#d97706] shadow-amber-700/40",
     ready: true,
   },
   {
     id: "basket",
     titleKey: "games.basketTitle",
     descKey: "games.basketDesc",
-    icon: <Lottie src="/lottie/basket-hit-1.json" className="h-full w-full" />,
-    tint: "bg-gradient-to-br from-[#fb923c] to-[#c2410c] shadow-orange-700/40",
+    iconSrc: "/lottie/basket-hit-1.json", iconFrame: 0, iconStyle: { transform: "translate(-0.7%, -2.1%) scale(0.98)" },
+    tint: "bg-gradient-to-br from-[#a855f7] to-[#6d28d9] shadow-violet-700/40",
     ready: true,
   },
 ];
@@ -130,43 +136,86 @@ export default function Games({ onGameOpenChange }: { onGameOpenChange?: (open: 
   // Сообщаем App, открыта ли полноэкранная игра → App гасит голубой фон вкладки Games
   // (иначе он мелькал под тёмной игрой при закрытии клавиатуры).
   useEffect(() => { onGameOpenChange?.(open !== null); }, [open, onGameOpenChange]);
-  if (open === "rocket") return <RocketGame onClose={() => setOpen(null)} />;
-  if (open === "dice") return <DiceGame onClose={() => setOpen(null)} />;
-  if (open === "case") return <CaseGame onClose={() => setOpen(null)} />;
-  if (open === "basket") return <BasketGame onClose={() => setOpen(null)} />;
+  const close = () => setOpen(null);
+  // Меню НЕ размонтируем при открытии игры (было early-return). Иначе при выходе из игры
+  // все 4 лотти-иконки + эмодзи-дождь строятся заново → видимая «прогрузка». Прячем через
+  // hidden (display:none — скрытое поддерево не анимируется/не композитится, нагрузки во
+  // время игры нет), держим в DOM. Игру рендерим поверх. Возврат = меню уже готово, мгновенно.
   return (
-    <div className="relative min-h-[100dvh]">
-      <FallingEmoji />
-      <div className="relative z-10 space-y-3 px-4 pb-28 pt-9">
-        {GAMES.map((g) => (
-          <GameCard key={g.id} game={g} onOpen={() => setOpen(g.id)} />
-        ))}
+    <>
+      <div hidden={open !== null} className="relative min-h-[100dvh]">
+        <FallingEmoji />
+        <div className="relative z-10 space-y-3 px-4 pb-28 pt-9">
+          <HeroCard game={GAMES[0]} onOpen={() => setOpen(GAMES[0].id)} />
+          <div className="grid grid-cols-3 gap-3">
+            {GAMES.slice(1).map((g) => (
+              <TileCard key={g.id} game={g} onOpen={() => setOpen(g.id)} />
+            ))}
+          </div>
+        </div>
       </div>
-    </div>
+      {open === "rocket" && <RocketGame onClose={close} />}
+      {open === "dice" && <DiceGame onClose={close} />}
+      {open === "case" && <CaseGame onClose={close} />}
+      {open === "basket" && <BasketGame onClose={close} />}
+    </>
   );
 }
 
-function GameCard({ game, onOpen }: { game: Game; onOpen: () => void }) {
+// Иконка-лотти: заморожена на кадре iconFrame (статичная) + transform центрирует её контент.
+function GameIcon({ game }: { game: Game }) {
+  return (
+    <Lottie
+      src={game.iconSrc}
+      freeze={game.iconFrame}
+      autoplay={false}
+      loop={false}
+      className="h-full w-full"
+      style={game.iconStyle}
+    />
+  );
+}
+
+// «Герой» — широкая плашка (Ракета): крупная иконка слева + название/описание.
+function HeroCard({ game, onOpen }: { game: Game; onOpen: () => void }) {
   const t = useT();
   return (
     <button
       onClick={onOpen}
       disabled={!game.ready}
-      className={
-        "flex w-full items-center gap-4 rounded-3xl p-5 text-left text-white shadow-lg transition active:scale-[0.98] " +
-        game.tint
-      }
+      className={"relative flex w-full items-center gap-3 overflow-hidden rounded-3xl p-5 text-left text-white shadow-lg transition active:scale-[0.98] " + game.tint}
     >
-      <span className="grid h-[68px] w-[68px] shrink-0 place-items-center drop-shadow-md">{game.icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-[17px] font-bold drop-shadow-sm">{t(game.titleKey)}</span>
+      <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-white/10" />
+      <span className="relative grid h-20 w-20 shrink-0 place-items-center drop-shadow-md">
+        <GameIcon game={game} />
+      </span>
+      <span className="relative min-w-0 flex-1">
+        <span className="block text-[20px] font-black drop-shadow-sm">{t(game.titleKey)}</span>
         <span className="mt-0.5 block text-[13px] font-medium text-white/85">{t(game.descKey)}</span>
       </span>
       {game.ready && (
-        <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0 text-white/80" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+        <svg viewBox="0 0 24 24" className="relative h-5 w-5 shrink-0 text-white/80" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
           <path d="M9 6l6 6-6 6" />
         </svg>
       )}
+    </button>
+  );
+}
+
+// Квадратная плитка: иконка по центру + название снизу.
+function TileCard({ game, onOpen }: { game: Game; onOpen: () => void }) {
+  const t = useT();
+  return (
+    <button
+      onClick={onOpen}
+      disabled={!game.ready}
+      className={"relative flex aspect-square w-full flex-col items-center justify-center gap-1.5 overflow-hidden rounded-2xl p-2 text-white shadow-lg transition active:scale-[0.97] " + game.tint}
+    >
+      <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-white/10" />
+      <span className="relative grid h-14 w-14 place-items-center drop-shadow-md">
+        <GameIcon game={game} />
+      </span>
+      <span className="relative text-[13px] font-bold drop-shadow-sm">{t(game.titleKey)}</span>
     </button>
   );
 }

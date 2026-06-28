@@ -164,10 +164,15 @@ func fetchPage(ctx context.Context, limit, offset int) ([]Market, error) {
 	return out, nil
 }
 
-// FetchMarketByCondition fetches a single market by its conditionId (our source_id).
-// Returns ok=false if Polymarket returns no such market.
+// FetchMarketByCondition fetches a single RESOLVED (closed) market by its conditionId
+// (our source_id). Returns ok=false if Polymarket has no closed market for it yet.
+//
+// closed=true is REQUIRED: gamma's /markets defaults to closed=false, so a market that
+// has resolved on Polymarket returns [] without it — and the resolver (the only caller)
+// could never settle. The resolver only ever acts on closed markets, so filtering to
+// closed here is exactly right: still-open markets return ok=false and we wait.
 func FetchMarketByCondition(ctx context.Context, conditionID string) (Market, bool, error) {
-	url := fmt.Sprintf("%s/markets?condition_ids=%s", gammaBase, conditionID)
+	url := fmt.Sprintf("%s/markets?condition_ids=%s&closed=true", gammaBase, conditionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return Market{}, false, err

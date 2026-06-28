@@ -212,11 +212,10 @@ export default function App() {
     // грузятся по тапу (это действие). Файлы тяжёлые ~300KB — кэшируем только две.
     prefetchLottie("dice-1");
     prefetchLottie("dice-6");
-    // Баскетбол: покой (basket-hit-1, первый кадр) парсим в кэш → мяч стоит сразу.
-    // Остальные броски прогреваем в HTTP-кэш, чтобы анимация по тапу стартовала без паузы.
-    prefetchLottie("basket-hit-1");
-    for (const f of ["basket-hit-2", "basket-miss-1", "basket-miss-2", "basket-miss-3"]) {
-      fetch(`/lottie/${f}.json`).catch(() => {});
+    // Баскетбол: парсим ВСЕ 5 бросков в кэш (animationData) → и покой стоит сразу, и бросок по
+    // тапу стартует МГНОВЕННО, без подгрузки/мерцания (Артём хочет всё прогружено заранее).
+    for (const f of ["basket-hit-1", "basket-hit-2", "basket-miss-1", "basket-miss-2", "basket-miss-3"]) {
+      prefetchLottie(f);
     }
     // Эмодзи-дождь Games: декодируем PNG заранее (Image.decode), чтобы первый заход
     // на вкладку не тормозил на декоде сотен тайлов.

@@ -10,8 +10,11 @@ import { getLottieData } from "../lottieCache";
 // 5 исходов по редкости (3 промаха + 2 попадания) и отдаёт КОНКРЕТНУЮ 🏀-анимацию — фронт
 // её играет; попал = выигрыш (ставка × множитель тира), мимо = ставка теряется. Деньги
 // авторитетны на сервере. Авто-броски — как в Костях. Фон — баскетбольный зал в перспективе;
-// камера во время броска ПРИВЯЗАНА К КАДРАМ анимации (onFrame) и едет за мячом по дуге
-// (наезд + проводка вниз в корзину), после — отъезд назад.
+// щит/кольцо/сетка нарисованы ВНУТРИ Lottie и имеют запечённый «наезд камеры»: центр щита
+// ныряет вниз, затем поднимается, одновременно вырастая ×2.33 (замерено по стеклу щита).
+// Чтобы щит выглядел приклеенным к стене, камера фона ПОВТОРЯЕТ это движение (CAM_CURVES:
+// масштаб + сдвиг по вертикали) вокруг центра щита в замахе (origin вычисляем из позиции
+// Lottie-бокса в рантайме). На результате зум держим (не «отъезжаем», иначе щит отклеится).
 
 const MIN_NANO = 100_000_000;
 const PRESETS = [0.1, 1, 5, 25];
@@ -20,11 +23,69 @@ const THROW_SPEED = 1.15;
 const AUTO_THROW_SPEED = 1.7;
 const AUTO_PAUSE_MS = 500;
 const THROW_FALLBACK_MS = 3400;
-const CAM_ZOOM = 1.5;  // наезд камеры к концу броска
-const CAM_DOWN = 34;   // px, проводка камеры вниз за мячом (в корзину)
 
-const TOP = "#06070e";
-const BG_BOTTOM = "#06070e";
+// Кривые «наезда» щита внутри Lottie: прогресс броска (0..1 = frame/total) → [масштаб, вертикаль].
+// Замерено покадрово по белому стеклу щита (центр + ширина). Щит не просто растёт: его центр
+// НЫРЯЕТ вниз (до +0.46 высоты бокса на ~p0.44) и затем ПОДНИМАЕТСЯ, одновременно вырастая
+// ×2.33 (от размера в замахе). Чтобы щит выглядел приклеенным к стене, камера фона повторяет
+// ровно это движение вокруг центра щита в замахе (origin): scale = s, сдвиг вниз = ty×высота
+// бокса. tyFrac — доля высоты бокса (центр щита относительно замаха). У анимаций 3 тайминга:
+// hit-2≡miss-1 рано, hit-1 средне, miss-2≡miss-3 поздно. Между точками — линейная интерполяция.
+type Cam = [number, number, number]; // [p, scale, tyFrac]
+const CAM_FAST: Cam[] = [ // hit-2, miss-1
+  [0, 1, 0], [0.233, 1, 0], [0.30, 1.03, 0.291], [0.333, 1.07, 0.358], [0.367, 1.12, 0.404],
+  [0.40, 1.19, 0.432], [0.433, 1.29, 0.438], [0.467, 1.45, 0.379], [0.50, 1.66, 0.311],
+  [0.533, 1.97, 0.195], [0.567, 2.33, 0.109], [1, 2.33, 0.109],
+];
+const CAM_SLOW: Cam[] = [ // miss-2, miss-3
+  [0, 1, 0], [0.233, 1, 0], [0.30, 1, 0.283], [0.333, 1.03, 0.326], [0.367, 1.07, 0.391],
+  [0.40, 1.10, 0.426], [0.433, 1.13, 0.43], [0.467, 1.19, 0.443], [0.50, 1.26, 0.436],
+  [0.533, 1.36, 0.422], [0.567, 1.47, 0.371], [0.60, 1.63, 0.301], [0.633, 1.82, 0.206],
+  [0.667, 2.05, 0.109], [0.70, 2.30, 0.109], [1, 2.33, 0.109],
+];
+const CAM_CURVES: Record<string, Cam[]> = {
+  "basket-hit-1": [
+    [0, 1, 0], [0.235, 1, 0], [0.30, 1.02, 0.29], [0.335, 1.03, 0.358], [0.369, 1.07, 0.414],
+    [0.402, 1.13, 0.443], [0.436, 1.19, 0.463], [0.469, 1.28, 0.436], [0.503, 1.39, 0.395],
+    [0.536, 1.53, 0.33], [0.57, 1.73, 0.248], [0.603, 1.98, 0.16], [0.637, 2.24, 0.111],
+    [0.67, 2.33, 0.109], [1, 2.33, 0.109],
+  ],
+  "basket-hit-2": CAM_FAST,
+  "basket-miss-1": CAM_FAST,
+  "basket-miss-2": CAM_SLOW,
+  "basket-miss-3": CAM_SLOW,
+};
+// interpCurve → [scale, tyFrac] линейной интерполяцией по прогрессу p.
+function interpCurve(c: Cam[], p: number): [number, number] {
+  if (p <= c[0][0]) return [c[0][1], c[0][2]];
+  for (let i = 1; i < c.length; i++) {
+    if (p <= c[i][0]) {
+      const [p0, s0, t0] = c[i - 1];
+      const [p1, s1, t1] = c[i];
+      const u = (p - p0) / (p1 - p0);
+      return [s0 + (s1 - s0) * u, t0 + (t1 - t0) * u];
+    }
+  }
+  const last = c[c.length - 1];
+  return [last[1], last[2]];
+}
+// Центр щита в ЗАМАХЕ в долях Lottie-бокса (точка, вокруг которой масштабируем стену). Замер.
+const BOARD_CX0 = 0.5;
+const BOARD_CY0 = 0.162;
+
+// Цвет синей стены (ровный навигационный синий, НЕ почти-чёрный). Им красим фон/шапку/панель и
+// верх задней стены → когда камера во время броска уезжает и обнажает фон, синева продолжается
+// без тёмной (читается как чёрная) полосы и без разрыва.
+const WALL = "#18233a";
+const TOP = WALL;
+const BG_BOTTOM = WALL;
+
+// Растворение мяча на краях бокса: при ПРОМАХЕ мяч вылетает за рамку анимации и раньше резко
+// обрезался. Маски-градиенты гасят края (лево/право + низ) → мяч плавно растворяется, а не
+// «обрубается». Верх НЕ гасим — там висит щит. Две вложенные маски (FADE_X на обёртке, FADE_Y
+// на боксе) перемножаются = пересечение, без капризного mask-composite.
+const FADE_X = "linear-gradient(to right, transparent, #000 15%, #000 85%, transparent)";
+const FADE_Y = "linear-gradient(to bottom, #000 88%, transparent)";
 
 function haptic(style: "light" | "medium" | "heavy" | "rigid" | "soft") {
   try {
@@ -49,77 +110,98 @@ function normStake(raw: string): string {
 
 const fmtMult = (milli: number) => (milli / 1000).toFixed(milli % 1000 === 0 ? 0 : milli % 100 === 0 ? 1 : 2);
 
-// ── Баскетбольный зал (процедурный SVG, 1-точечная перспектива). ШИРОКИЙ корт: дальний
-//    край (лицевая) широкий, перспектива не «коридором». Пол, задняя стена со щитом,
-//    боковые трибуны, потолок — к точке схода у кольца. Разметка, спот, виньетка.
-const VP = { x: 180, y: 200 };
-const FLOOR = "-110,660 470,660 290,300 70,300";
-const FARWALL = "70,120 290,120 290,300 70,300";
-const LWALL = "-110,-40 70,120 70,300 -110,660";
-const RWALL = "470,-40 290,120 290,300 470,660";
-const CEIL = "-110,-40 470,-40 290,120 70,120";
-const PLANKS = Array.from({ length: 17 }, (_, i) => -130 + (i / 16) * 620);
+// ── Баскетбольный зал (процедурный SVG, 1-точечная перспектива). Камера за дальней от кольца
+//    лицевой, смотрит на кольцо у ЗАДНЕЙ стены. Комната: задняя стена + боковые (без потолка —
+//    уходят вверх за кадр), деревянный пол с НАСТОЯЩЕЙ разметкой (зона, штрафной, 3-очковая,
+//    полукруг под кольцом). proj(depthFt, latFt) → экран [x,y]: depth 0 — лицевая под кольцом
+//    (вверху), растёт К ЗРИТЕЛЮ (вниз); lat 0 — центр, ±25ft — боковые. Точка схода (180,VPY).
+// Калибровка перспективы: лицевая линия (depth0) на BASE_Y, ближний край (d=1) у низа (y=720),
+// полуширина корта на лицевой = HALF_W. BASE_Y поднята к щиту → разметка ВЫШЕ мяча, мяч стоит на
+// корте «с игры» (внутри дуги ≈ 2 очка), а не вплотную под кольцом. Подобрано на композите экрана.
+const VPY = 196, BASE_Y = 218, NEAR_FT = 38, HALF_W = 110, FLAT = 0.42;
+const SYK = 720 - VPY;
+const D0 = SYK / (BASE_Y - VPY);
+const FTU = NEAR_FT / (D0 - 1);
+const SXK = (HALF_W * D0) / 25;
+const proj = (dep: number, lat: number): [number, number] => {
+  const d = D0 - dep / FTU;
+  return [180 + (SXK * lat) / d, VPY + SYK / d];
+};
+const cpts = (arr: [number, number][]) => arr.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+const cArc = (a: [number, number], rx: number, ry: number, b: [number, number]) =>
+  `M ${a[0].toFixed(1)},${a[1].toFixed(1)} A ${rx.toFixed(1)} ${ry.toFixed(1)} 0 0 0 ${b[0].toFixed(1)},${b[1].toFixed(1)}`;
+
+const C_BL = proj(0, -25), C_BR = proj(0, 25);                 // дальние углы пола = низ задней стены
+const C_BACKX = C_BL[0], C_BACKW = C_BR[0] - C_BL[0], C_BASEY = C_BL[1];
+const C_FLOOR = cpts([proj(0, -25), proj(0, 25), proj(NEAR_FT, 25), proj(NEAR_FT, -25)]);
+const C_FLn = proj(NEAR_FT, -25), C_FRn = proj(NEAR_FT, 25);  // ближние углы пола (за кадром по бокам)
+const C_YL0 = C_BL[1] + (C_FLn[1] - C_BL[1]) * ((0 - C_BL[0]) / (C_FLn[0] - C_BL[0]));   // пол↔лев.стена на x=0
+const C_YR0 = C_BR[1] + (C_FRn[1] - C_BR[1]) * ((360 - C_BR[0]) / (C_FRn[0] - C_BR[0])); // пол↔прав.стена на x=360
+const C_LANE = cpts([proj(0, -8), proj(0, 8), proj(19, 8), proj(19, -8)]);
+const C_FTC = proj(19, 0), C_FT_RX = proj(19, 6)[0] - proj(19, 0)[0];
+// круги на полу рисуем ПЛОСКИМИ эллипсами (ry ≤ rx·FLAT) — крутая перспектива иначе даёт «стоячий» овал
+const C_FT_CY = C_FTC[1], C_FT_RY = Math.min((proj(25, 0)[1] - proj(13, 0)[1]) / 2, C_FT_RX * FLAT);
+const C_3L0 = proj(0, -22), C_3L1 = proj(14.19, -22), C_3R0 = proj(0, 22), C_3R1 = proj(14.19, 22);
+const C_ARC_RX = (C_3R1[0] - C_3L1[0]) / 2, C_ARC_RY = Math.min(proj(29, 0)[1] - C_3L1[1], C_ARC_RX * 0.7);
+const C_ARC = cArc(C_3L1, C_ARC_RX, C_ARC_RY, C_3R1);
+const C_RA = cArc(proj(1.25, -4), proj(5.25, 4)[0] - 180, Math.min((proj(9.25, 0)[1] - proj(1.25, 0)[1]) / 2, (proj(5.25, 4)[0] - 180) * FLAT), proj(1.25, 4));
+const C_PLANKS = Array.from({ length: 25 }, (_, i) => -24 + i * 2); // lat каждой доски (вдоль корта)
+// На сколько (viewBox-единиц) стены и свечение рисуются ВЫШЕ кадра. При наезде камеры вниз во
+// время броска эта «надстройка» въезжает сверху → три стены со свечением продолжаются без разрыва.
+const C_EXT = 340;
+
 const BasketCourt = memo(function BasketCourt() {
   return (
-    <svg className="absolute inset-0 h-full w-full" viewBox="0 0 360 640" preserveAspectRatio="xMidYMid slice" aria-hidden>
+    <svg className="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 360 640" preserveAspectRatio="xMidYMid slice" aria-hidden>
       <defs>
-        <linearGradient id="bWood" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#3f2a14" /><stop offset="0.55" stopColor="#6e4a23" /><stop offset="1" stopColor="#a4703a" />
+        <linearGradient id="cWood" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#6a4621" /><stop offset="0.5" stopColor="#925f2c" /><stop offset="1" stopColor="#c08c4c" />
         </linearGradient>
-        <linearGradient id="bLwall" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor="#0a0e1c" /><stop offset="1" stopColor="#1a2138" />
+        {/* userSpaceOnUse: цвет/свечение привязаны к координатам, а не к bbox → корректны и в надстройке выше кадра */}
+        <linearGradient id="cBack" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2={C_BASEY}>
+          <stop offset="0" stopColor="#18233a" /><stop offset="1" stopColor="#20304f" />
         </linearGradient>
-        <linearGradient id="bRwall" x1="1" y1="0" x2="0" y2="0">
-          <stop offset="0" stopColor="#0a0e1c" /><stop offset="1" stopColor="#1a2138" />
-        </linearGradient>
-        <linearGradient id="bFar" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#1d3a61" /><stop offset="1" stopColor="#0e2138" />
-        </linearGradient>
-        <radialGradient id="bLight" cx="0.5" cy="0" r="0.75">
-          <stop offset="0" stopColor="#cfe0ff" stopOpacity="0.20" /><stop offset="1" stopColor="#cfe0ff" stopOpacity="0" />
-        </radialGradient>
-        <radialGradient id="bSpot" cx="0.5" cy="0.64" r="0.62">
-          <stop offset="0" stopColor="#ffd28c" stopOpacity="0.30" /><stop offset="0.55" stopColor="#ffb95e" stopOpacity="0.08" /><stop offset="1" stopColor="#ffb95e" stopOpacity="0" />
-        </radialGradient>
-        <radialGradient id="bVig" cx="0.5" cy="0.5" r="0.78">
-          <stop offset="0.56" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity="0.6" />
-        </radialGradient>
-        <clipPath id="bFloorClip"><polygon points={FLOOR} /></clipPath>
+        <linearGradient id="cLW" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#101a2e" /><stop offset="1" stopColor="#18233a" /></linearGradient>
+        <linearGradient id="cRW" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stopColor="#101a2e" /><stop offset="1" stopColor="#18233a" /></linearGradient>
+        <radialGradient id="cHoop" gradientUnits="userSpaceOnUse" cx="180" cy="40" r="260"><stop offset="0" stopColor="#cdd9ff" stopOpacity="0.18" /><stop offset="1" stopColor="#cdd9ff" stopOpacity="0" /></radialGradient>
+        <radialGradient id="cSpot" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stopColor="#ffe7c2" stopOpacity="0.14" /><stop offset="1" stopColor="#ffe7c2" stopOpacity="0" /></radialGradient>
+        <linearGradient id="cVig" x1="0" y1="0" x2="0" y2="1"><stop offset="0.74" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity="0.5" /></linearGradient>
+        <clipPath id="cFloorClip"><polygon points={C_FLOOR} /></clipPath>
       </defs>
 
-      <rect x="0" y="0" width="360" height="640" fill="#06070e" />
-      <polygon points={CEIL} fill="#070912" />
-      <polygon points={LWALL} fill="url(#bLwall)" />
-      <polygon points={RWALL} fill="url(#bRwall)" />
-      <g stroke="#ffffff" strokeOpacity="0.045" strokeWidth="1">
-        <line x1="-110" y1="120" x2="70" y2="165" /><line x1="-110" y1="340" x2="70" y2="230" /><line x1="-110" y1="560" x2="70" y2="282" />
-        <line x1="470" y1="120" x2="290" y2="165" /><line x1="470" y1="340" x2="290" y2="230" /><line x1="470" y1="560" x2="290" y2="282" />
-      </g>
-      <polygon points={FARWALL} fill="url(#bFar)" />
-      <rect x="70" y="108" width="220" height="74" fill="url(#bLight)" />
-
-      <polygon points={FLOOR} fill="url(#bWood)" />
-      <g clipPath="url(#bFloorClip)" stroke="#ffffff" fill="none">
-        <g stroke="#000000" strokeOpacity="0.17" strokeWidth="2">
-          {PLANKS.map((xb, i) => <line key={i} x1={xb} y1={660} x2={VP.x} y2={VP.y} />)}
-        </g>
-        <g stroke="#ffe6c0" strokeOpacity="0.08" strokeWidth="1">
-          {PLANKS.map((xb, i) => <line key={i} x1={xb + 10} y1={660} x2={VP.x + 1} y2={VP.y} />)}
-        </g>
-        <path d="M 40 300 Q 180 596 320 300" strokeOpacity="0.5" strokeWidth="3" />
-        <polygon points="155,300 205,300 251,486 109,486" fill="#c2410c" fillOpacity="0.20" stroke="none" />
-        <polygon points="155,300 205,300 251,486 109,486" strokeOpacity="0.55" strokeWidth="3" />
-        <line x1="109" y1="486" x2="251" y2="486" strokeOpacity="0.55" strokeWidth="3" />
-        <ellipse cx="180" cy="486" rx="71" ry="22" strokeOpacity="0.45" strokeWidth="3" />
-      </g>
-      <g stroke="#ffffff" fill="none" strokeWidth="2">
-        <line x1="70" y1="300" x2="290" y2="300" strokeOpacity="0.5" />
-        <line x1="70" y1="300" x2="-110" y2="660" strokeOpacity="0.26" />
-        <line x1="290" y1="300" x2="470" y2="660" strokeOpacity="0.26" />
+      {/* комната: 3 стены (задняя + боковые) + свечение, без потолка. Рисуем ВЫШЕ кадра на C_EXT
+          (overflow-visible) → при наезде камеры вниз стены со свечением продолжаются вверх без разрыва. */}
+      <rect x="0" y={-C_EXT} width="360" height={640 + C_EXT} fill="#18233a" />
+      <polygon points={`0,${-C_EXT} ${C_BACKX.toFixed(1)},${-C_EXT} ${C_BACKX.toFixed(1)},${C_BASEY.toFixed(1)} 0,${C_YL0.toFixed(1)}`} fill="url(#cLW)" />
+      <polygon points={`360,${-C_EXT} ${C_BR[0].toFixed(1)},${-C_EXT} ${C_BR[0].toFixed(1)},${C_BASEY.toFixed(1)} 360,${C_YR0.toFixed(1)}`} fill="url(#cRW)" />
+      <rect x={C_BACKX} y={-C_EXT} width={C_BACKW} height={C_BASEY + C_EXT} fill="url(#cBack)" />
+      <rect x="0" y={-C_EXT} width="360" height={C_BASEY + C_EXT + 60} fill="url(#cHoop)" />
+      <g stroke="#ffffff" strokeOpacity="0.05" strokeWidth="1">
+        <line x1={C_BACKX} y1={-C_EXT} x2={C_BACKX} y2={C_BASEY} /><line x1={C_BR[0]} y1={-C_EXT} x2={C_BR[0]} y2={C_BASEY} />
       </g>
 
-      <ellipse cx="180" cy="440" rx="250" ry="190" fill="url(#bSpot)" />
-      <rect x="0" y="0" width="360" height="640" fill="url(#bVig)" />
+      <polygon points={C_FLOOR} fill="url(#cWood)" />
+      <g clipPath="url(#cFloorClip)">
+        <g stroke="#3a2410" strokeOpacity="0.55" strokeWidth="1.4">
+          {C_PLANKS.map((lat, i) => { const a = proj(0, lat), b = proj(NEAR_FT, lat); return <line key={i} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} />; })}
+        </g>
+        <g stroke="#e7c79a" strokeOpacity="0.10" strokeWidth="1">
+          {C_PLANKS.map((lat, i) => { const a = proj(0, lat + 0.18), b = proj(NEAR_FT, lat + 0.18); return <line key={i} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} />; })}
+        </g>
+        <ellipse cx="180" cy="430" rx="250" ry="150" fill="url(#cSpot)" />
+      </g>
+
+      <g stroke="#f4f1e8" strokeOpacity="0.85" fill="none" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round">
+        <line x1={C_BL[0]} y1={C_BASEY} x2={C_BR[0]} y2={C_BASEY} />
+        <polygon points={C_LANE} fill="#c2410c" fillOpacity="0.18" />
+        <ellipse cx={C_FTC[0]} cy={C_FT_CY} rx={C_FT_RX} ry={C_FT_RY} />
+        <line x1={C_3L0[0]} y1={C_3L0[1]} x2={C_3L1[0]} y2={C_3L1[1]} />
+        <line x1={C_3R0[0]} y1={C_3R0[1]} x2={C_3R1[0]} y2={C_3R1[1]} />
+        <path d={C_ARC} />
+        <path d={C_RA} strokeWidth="1.8" />
+      </g>
+
+      <rect x="0" y="0" width="360" height="640" fill="url(#cVig)" />
     </svg>
   );
 });
@@ -152,6 +234,9 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
 
   const clipRef = useRef<HTMLDivElement>(null);
   const courtRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const camCurveRef = useRef<Cam[]>(CAM_CURVES["basket-hit-1"]);
+  const camBoxHRef = useRef(0); // высота Lottie-бокса (px), снимается на старте броска
   const ctxRef = useRef<BasketThrowResult | null>(null);
   const settledRef = useRef(true);
   const fallbackRef = useRef<number>(0);
@@ -191,26 +276,34 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // Камера: во время throwing КАЖДЫЙ кадр анимации (onThrowFrame) двигает зал — наезд +
-  // проводка вниз за мячом, синхронно с лотти. Вне броска — плавный отъезд к исходному.
+  // Камера: в throwing каждый кадр (onThrowFrame) повторяет движение щита — масштаб + сдвиг вниз
+  // (camCurve) вокруг центра щита в замахе (origin из позиции Lottie-бокса в рантайме). На старте
+  // броска ставим origin, снимаем высоту бокса и сбрасываем transform. На "revealed" камеру НЕ
+  // трогаем — держит финал (щит приклеен к стене и в показе результата). На "idle" — возврат к 1.
   useLayoutEffect(() => {
     const c = courtRef.current;
     if (!c) return;
     if (phase === "throwing") {
-      c.style.transition = "none"; // кадры драйвят transform напрямую
-    } else {
+      const box = boxRef.current;
+      if (box) {
+        const br = box.getBoundingClientRect();
+        camBoxHRef.current = br.height;
+        c.style.transformOrigin = `${br.left + br.width * BOARD_CX0}px ${br.top + br.height * BOARD_CY0}px`;
+      }
+      c.style.transition = "none";                  // кадры драйвят transform напрямую
+      c.style.transform = "translateY(0px) scale(1)"; // старт броска: щит мал → зал в 1×
+    } else if (phase === "idle") {
       c.style.transition = "transform 700ms cubic-bezier(0.3, 0, 0.2, 1)";
       c.style.transform = "translateY(0px) scale(1)";
     }
+    // phase === "revealed": камеру не трогаем — держит финальный зум
   }, [phase, throwSeq]);
 
   const onThrowFrame = useCallback((p: number) => {
     const c = courtRef.current;
     if (!c) return;
-    const e = p * p; // ускоряемся к корзине
-    const s = 1 + (CAM_ZOOM - 1) * e;
-    const ty = CAM_DOWN * e;
-    c.style.transform = `translateY(${ty}px) scale(${s})`;
+    const [s, tyFrac] = interpCurve(camCurveRef.current, p);
+    c.style.transform = `translateY(${tyFrac * camBoxHRef.current}px) scale(${s})`;
   }, []);
 
   const reloadBalance = useCallback(() => {
@@ -289,6 +382,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
       const res = await basketThrow(nano);
       ctxRef.current = res;
       setThrowAnim(res.anim);
+      camCurveRef.current = CAM_CURVES[res.anim] ?? CAM_CURVES["basket-hit-1"];
       setThrowSpeed(autoRef.current ? AUTO_THROW_SPEED : THROW_SPEED);
       settledRef.current = false;
       setPhase("throwing");
@@ -319,7 +413,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed left-0 top-0 z-50 w-full overflow-hidden text-white" style={{ height: "var(--app-h, 100dvh)", background: BG_BOTTOM }}>
       <div ref={clipRef} className="absolute inset-x-0 top-0 overflow-hidden" style={{ height: "var(--app-h, 100dvh)" }}>
-        <div ref={courtRef} className="pointer-events-none absolute inset-0 will-change-transform" style={{ transformOrigin: "50% 30%" }}>
+        <div ref={courtRef} className="pointer-events-none absolute inset-0 will-change-transform">
           <BasketCourt />
         </div>
 
@@ -343,7 +437,8 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="flex flex-1 flex-col items-center justify-center overflow-hidden px-4">
-            <div className="grid h-72 w-72 place-items-center drop-shadow-[0_10px_24px_rgba(0,0,0,0.55)]">
+            <div className="h-72 w-72" style={{ WebkitMaskImage: FADE_X, maskImage: FADE_X, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat" }}>
+            <div ref={boxRef} className="grid h-72 w-72 place-items-center" style={{ WebkitMaskImage: FADE_Y, maskImage: FADE_Y, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat" }}>
               {phase === "idle" ? (
                 <Lottie
                   key="idle"
@@ -357,6 +452,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
                 <Lottie
                   key={`throw-${throwSeq}`}
                   src={`/lottie/${throwAnim}.json`}
+                  animationData={getLottieData(throwAnim)}
                   className="h-72 w-72"
                   loop={false}
                   autoplay
@@ -365,6 +461,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
                   onComplete={finalize}
                 />
               )}
+            </div>
             </div>
 
             <div className="pointer-events-none mt-1 flex h-14 flex-col items-center justify-center">
@@ -385,7 +482,7 @@ export default function BasketGame({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          <div className="border-t border-white/10 bg-[#0b0e16]/95 px-4 pb-3 pt-3 backdrop-blur-sm">
+          <div className="border-t border-white/10 bg-[#18233a] px-4 pb-3 pt-3">
             {err && <p className="mb-2 text-center text-xs text-rose-400">{err}</p>}
 
             <div className="mb-2 flex items-center justify-center gap-3 text-[11px] font-medium text-white/55">

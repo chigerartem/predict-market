@@ -21,8 +21,9 @@ const GAP = 8;
 const STRIDE = CARD_W + GAP;
 const REEL_LEN = 64;
 const WIN_INDEX = 58;
-const DUR_MS = 5400;
-const FALLBACK_MS = DUR_MS + 500;
+const DUR_MS = 5400;        // длительность спина (ручной режим)
+const AUTO_DUR_MS = 2600;   // быстрее в авто-режиме
+const AUTO_PAUSE_MS = 800;  // пауза между авто-спинами (успеть увидеть результат)
 // Визуальные веса наполнителя ленты (НЕ реальные шансы — те на сервере): лента яркая,
 // «пусто» мелькает редко, иксы преобладают. Порядок = тиры приза (low→high).
 const VIS_WEIGHTS = [14, 28, 26, 18, 9, 5];
@@ -161,6 +162,15 @@ const Sparkles = memo(function Sparkles() {
   );
 });
 
+function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} onClick={onToggle}
+      className={"relative h-6 w-11 shrink-0 rounded-full transition-colors " + (on ? "bg-amber-400" : "bg-white/15")}>
+      <span className={"absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all " + (on ? "left-[22px]" : "left-0.5")} />
+    </button>
+  );
+}
+
 export default function CaseGame({ onClose }: { onClose: () => void }) {
   const t = useT();
   const [st, setSt] = useState<CaseState | null>(null);
@@ -174,6 +184,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
   const [recent, setRecent] = useState<CaseSpinRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [auto, setAuto] = useState(false);
 
   const clipRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -182,6 +193,9 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
   const settledRef = useRef(true);
   const fallbackRef = useRef<number>(0);
   const flashTimer = useRef<number>(0);
+  const autoRef = useRef(auto);
+  autoRef.current = auto;
+  const spinRef = useRef<() => void>(() => {});
 
   const minNano = st?.min_stake_nano ?? 100_000_000;
 
@@ -297,22 +311,27 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
     const w = vp.clientWidth;
     const jitter = (Math.random() - 0.5) * CARD_W * 0.6;
     const target = w / 2 - (WIN_INDEX * STRIDE + CARD_W / 2) + jitter;
+    const dur = autoRef.current ? AUTO_DUR_MS : DUR_MS;
 
+    // ВАЖНО: сохраняем translateY(-50%) (вертикальная центровка ленты в окне). Без него
+    // инлайн-transform перетёр бы класс -translate-y-1/2 и лента падала бы вниз (видно пол-ленты).
     track.style.transition = "none";
-    track.style.transform = "translateX(0px)";
+    track.style.transform = "translate(0px, -50%)";
     void track.offsetWidth;
-    track.style.transition = `transform ${DUR_MS}ms cubic-bezier(0.10, 0.82, 0.16, 1)`;
-    track.style.transform = `translateX(${target}px)`;
+    track.style.transition = `transform ${dur}ms cubic-bezier(0.10, 0.82, 0.16, 1)`;
+    track.style.transform = `translate(${target}px, -50%)`;
 
     const onEnd = (e: TransitionEvent) => { if (e.propertyName === "transform") finalize(); };
     track.addEventListener("transitionend", onEnd);
     window.clearTimeout(fallbackRef.current);
-    fallbackRef.current = window.setTimeout(finalize, FALLBACK_MS);
+    fallbackRef.current = window.setTimeout(finalize, dur + 500);
     return () => track.removeEventListener("transitionend", onEnd);
   }, [spinSeq, spinning, finalize]);
 
   const balanceTon = balanceNano / 1e9;
-  const canSpin = !!st && !spinning && !pending && (Number(stake) || 0) > 0;
+  const busy = pending || spinning;
+  const canSpin = !!st && !busy && (Number(stake) || 0) > 0;
+  const lock = busy || auto; // в авто блокируем ввод ставки/пресеты
 
   const spin = async () => {
     if (!st || spinning || pending) return;
@@ -340,8 +359,20 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
       setSpinning(false);
       setErr(e instanceof Error ? e.message : String(e));
       hapticNotify("error");
+      setAuto(false);
     }
   };
+  spinRef.current = spin;
+
+  // Авто-режим: пока включён и не заняты — крутим снова (после паузы на показ результата).
+  // Стоп при нехватке баланса/минимума (как в Костях/Баскете).
+  useEffect(() => {
+    if (!auto || busy) return;
+    const nano = Math.round((Number(stake) || 0) * 1e9);
+    if (nano < minNano || nano > balanceNano) { setAuto(false); return; }
+    const id = window.setTimeout(() => spinRef.current(), result ? AUTO_PAUSE_MS : 0);
+    return () => window.clearTimeout(id);
+  }, [auto, busy, result, balanceNano, stake, minNano]);
 
   return (
     <div className="fixed left-0 top-0 z-50 w-full overflow-hidden text-white" style={{ height: "var(--app-h, 100dvh)", background: BG_BOTTOM }}>
@@ -443,11 +474,11 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setStake(normStake(e.target.value))}
                 className="min-w-0 flex-1 bg-transparent py-3 text-base tabular-nums outline-none placeholder:text-white/30"
                 placeholder="0.0"
-                disabled={spinning}
+                disabled={lock}
               />
               <button
                 onClick={() => setStake(balanceTon > 0 ? String(Math.floor(balanceTon * 100) / 100) : "0")}
-                disabled={spinning}
+                disabled={lock}
                 className="flex shrink-0 items-center gap-1 rounded-xl bg-white/10 px-2.5 py-1.5 text-sm font-bold tabular-nums text-white/80 active:scale-95 disabled:opacity-40"
               >
                 <TonIcon size={13} />
@@ -460,7 +491,7 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
                 <button
                   key={p}
                   onClick={() => setStake(String(p))}
-                  disabled={spinning}
+                  disabled={lock}
                   className="rounded-xl border border-white/10 bg-white/[0.05] py-2.5 text-sm font-bold tabular-nums text-amber-300 active:scale-95 disabled:opacity-40"
                 >
                   {p}
@@ -468,12 +499,25 @@ export default function CaseGame({ onClose }: { onClose: () => void }) {
               ))}
             </div>
 
+            <div className="mb-2 flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5">
+              <span className="flex items-center gap-2 text-sm font-semibold text-white/80">
+                <svg viewBox="0 0 24 24" className="h-4 w-4 text-amber-300" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+                </svg>
+                {t("case.auto")}
+              </span>
+              <Switch on={auto} onToggle={() => setAuto((a) => !a)} />
+            </div>
+
             <button
-              onClick={spin}
-              disabled={!canSpin}
-              className="w-full rounded-2xl bg-gradient-to-r from-amber-400 to-orange-600 py-4 text-base font-black text-white shadow-lg shadow-orange-500/30 transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={auto ? () => setAuto(false) : spin}
+              disabled={!auto && !canSpin}
+              className={
+                "w-full rounded-2xl py-4 text-base font-black text-white shadow-lg transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 " +
+                (auto ? "border border-white/15 bg-white/[0.08]" : "bg-gradient-to-r from-amber-400 to-orange-600 shadow-orange-500/30")
+              }
             >
-              {pending || spinning ? t("case.opening") : `${t("case.open")} · ${fmtTon(Number(stake) || 0)} TON`}
+              {auto ? t("case.stop") : busy ? t("case.opening") : `${t("case.open")} · ${fmtTon(Number(stake) || 0)} TON`}
             </button>
 
             <div className="mt-2 truncate text-center text-[10px] text-white/25">
