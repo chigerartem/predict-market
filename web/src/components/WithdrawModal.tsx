@@ -18,12 +18,11 @@ type Props = {
 
 const NANO = 1_000_000_000;
 
-type WMethod = "ton" | "gifts";
+type WMethod = "ton" | "stars";
 
-// Способы вывода — цветные карточки, как методы на депозите. TON работает (перевод
-// на кошелёк); «Подарок» — обмен TON на выбранный подарок (каталог на бэке, пока
-// «скоро»). Звёзды отдельным способом нельзя: Bot API не умеет начислять звёзды
-// юзеру — это тот же подарочный путь.
+// Способы вывода — цветные карточки, как на депозите. TON работает (авто-перевод на
+// кошелёк). Stars авто-вывести нельзя (Bot API не начисляет звёзды юзеру), поэтому
+// звёзды выводим ВРУЧНУЮ: экран направляет написать админу (@LinkerFlugel).
 const METHODS: { id: WMethod; emoji: ReactNode; title: TKey; desc: TKey; tint: string }[] = [
   {
     id: "ton",
@@ -33,11 +32,11 @@ const METHODS: { id: WMethod; emoji: ReactNode; title: TKey; desc: TKey; tint: s
     tint: "bg-gradient-to-br from-[#41b6ff] to-[#1a6bf0] shadow-sky-600/40",
   },
   {
-    id: "gifts",
-    emoji: <Lottie src="/lottie/gift.json" className="h-full w-full" />,
-    title: "wd.methGifts",
-    desc: "wd.methGiftsDesc",
-    tint: "bg-gradient-to-br from-[#ff4d94] to-[#b521d6] shadow-pink-600/40",
+    id: "stars",
+    emoji: <Lottie src="/lottie/star.json" className="h-full w-full" />,
+    title: "wd.methStars",
+    desc: "wd.methStarsDesc",
+    tint: "bg-gradient-to-br from-[#ffd23f] to-[#ff8a00] shadow-orange-600/40",
   },
 ];
 
@@ -101,7 +100,7 @@ export default function WithdrawModal({ open, onClose, balanceNano, minNano, fee
             onSuccess={onSuccess}
           />
         ) : (
-          <ComingSoon t={t} title="wd.methGifts" onBack={() => setMethod(null)} />
+          <StarsWithdraw t={t} onBack={() => setMethod(null)} />
         )}
       </div>
     </BottomSheet>
@@ -123,15 +122,31 @@ function BackButton({ t, onBack }: { t: TFunc; onBack: () => void }) {
   );
 }
 
-// Заглушка «скоро» для способов без готового бэка (подарки/каталог).
-function ComingSoon({ t, title, onBack }: { t: TFunc; title: TKey; onBack: () => void }) {
+// Вывод звёздами — РУЧНОЙ процесс: авто-начисления звёзд юзеру в Bot API нет, поэтому
+// экран направляет написать админу (@LinkerFlugel), который переводит звёзды вручную.
+// Баланс НЕ трогаем (договорённость в личке). Кнопка открывает чат внутри Telegram.
+const STARS_ADMIN = "LinkerFlugel"; // без @ — для t.me/<handle>
+
+function StarsWithdraw({ t, onBack }: { t: TFunc; onBack: () => void }) {
+  const openChat = () => {
+    const url = `https://t.me/${STARS_ADMIN}`;
+    const tg = window.Telegram?.WebApp;
+    if (tg?.openTelegramLink) tg.openTelegramLink(url);
+    else window.open(url, "_blank");
+  };
   return (
     <div>
       <BackButton t={t} onBack={onBack} />
       <div className="flex flex-col items-center pb-2 pt-3 text-center">
-        <Lottie src="/lottie/gift.json" className="h-24 w-24" />
-        <div className="mt-2 text-lg font-bold">{t(title)}</div>
-        <p className="mt-2 max-w-xs text-sm text-neutral-400">{t("wd.comingSoon")}</p>
+        <Lottie src="/lottie/star.json" className="h-24 w-24" />
+        <div className="mt-2 text-lg font-bold">{t("wd.starsTitle")}</div>
+        <p className="mt-2 max-w-xs text-sm text-neutral-400">{t("wd.starsText")}</p>
+        <button
+          onClick={openChat}
+          className="mt-6 w-full rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-500/30 transition active:scale-[0.99] hover:brightness-110"
+        >
+          {t("wd.starsContact")}
+        </button>
       </div>
     </div>
   );

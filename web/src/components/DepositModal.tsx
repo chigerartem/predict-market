@@ -7,19 +7,12 @@ import BottomSheet from "./BottomSheet";
 import Lottie from "./Lottie";
 import TonIcon from "./TonIcon";
 
-type Method = "gifts" | "ton" | "stars";
+type Method = "ton" | "stars";
 type Props = { open: boolean; onClose: () => void; onSuccess?: () => void };
 
 // tint — яркий градиент-акцент карточки по методу (casino-стиль, не тусклые тинты):
-// подарок розово-фиолетовый, TON голубой, Stars золотой. Цветное свечение снизу.
+// TON голубой, Stars золотой. Цветное свечение снизу. Подарки убраны (только TON и Stars).
 const METHODS: { id: Method; emoji: ReactNode; title: TKey; desc: TKey; tint: string }[] = [
-  {
-    id: "gifts",
-    emoji: <Lottie src="/lottie/gift.json" className="h-full w-full" />,
-    title: "dep.gifts",
-    desc: "dep.giftsDesc",
-    tint: "bg-gradient-to-br from-[#ff4d94] to-[#b521d6] shadow-pink-600/40",
-  },
   {
     id: "ton",
     emoji: <TonIcon size={34} />,
@@ -39,8 +32,8 @@ const METHODS: { id: Method; emoji: ReactNode; title: TKey; desc: TKey; tint: st
 const MIN_STARS = 50;
 const PRESETS = [100, 250, 500, 1000];
 
-// Пополнение баланса (TON). Stars — рабочий путь (инвойс → openInvoice → кредит на
-// webhook); TON и подарки пока заглушка «скоро».
+// Пополнение баланса: TON (через TON Connect) и Stars (инвойс → openInvoice → кредит
+// на webhook). Подарки убраны.
 export default function DepositModal({ open, onClose, onSuccess }: Props) {
   const t = useT();
   const [method, setMethod] = useState<Method | null>(null);
@@ -95,22 +88,8 @@ export default function DepositModal({ open, onClose, onSuccess }: Props) {
           </>
         ) : active.id === "stars" ? (
           <StarsDeposit t={t} onBack={() => setMethod(null)} onClose={onClose} onSuccess={onSuccess} />
-        ) : active.id === "ton" ? (
-          <TonDeposit t={t} onBack={() => setMethod(null)} onClose={onClose} onSuccess={onSuccess} />
         ) : (
-          <div className="flex flex-col items-center pb-2 pt-3 text-center">
-            <span className="grid h-24 w-24 place-items-center text-4xl">
-              {active.emoji}
-            </span>
-            <div className="mt-4 text-lg font-semibold">{t(active.title)}</div>
-            <p className="mt-2 max-w-xs text-sm text-neutral-400">{t("dep.gettingReady")}</p>
-            <button
-              onClick={() => setMethod(null)}
-              className="mt-6 rounded-2xl border border-white/15 bg-white/5 px-6 py-3 text-sm font-semibold transition active:scale-[0.98] hover:bg-white/10"
-            >
-              {t("common.back")}
-            </button>
-          </div>
+          <TonDeposit t={t} onBack={() => setMethod(null)} onClose={onClose} onSuccess={onSuccess} />
         )}
       </div>
     </BottomSheet>
