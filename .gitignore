@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.demo
 *.key
 *.pem
 secrets/
@@ -35,3 +36,9 @@ tmp/
 .vscode/
 *.swp
 .claude/
+
+# --- Ops / infra / internal docs (kept local, not in the public portfolio repo) ---
+/deploy.sh
+/docker-compose.prod.yml
+/scripts/
+/docs/
