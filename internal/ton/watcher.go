@@ -80,7 +80,12 @@ func (wc *Watcher) Poll(ctx context.Context) (int, error) {
 	}
 	resp, err := wc.http.Do(req)
 	if err != nil {
-		return 0, err
+		// Scrub the toncenter api_key: a *url.Error from Do embeds the request URL.
+		msg := err.Error()
+		if wc.apiKey != "" {
+			msg = strings.ReplaceAll(msg, wc.apiKey, "***")
+		}
+		return 0, fmt.Errorf("toncenter request failed: %s", msg)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

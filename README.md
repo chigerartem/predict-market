@@ -163,6 +163,18 @@ nonce, so a single play can't be cherry-picked. Rotating the seed **reveals the 
 seed**, so every past outcome under it can be recomputed and checked. Market bets don't
 need this — they settle from public Polymarket results.
 
+## Security
+
+Money correctness and account safety are the priority. Key measures:
+
+- **Telegram-native auth** — every API call validates Mini App `initData` (HMAC-SHA256) against the bot token, in constant time, with an expiry window. The user id is always taken from the verified payload, never from the request body — no IDOR.
+- **Authenticated, idempotent payments webhook** — the Stars `successful_payment` webhook is rejected unless it carries Telegram's secret token (fail-closed), and each payment is credited exactly once, keyed on the Telegram charge id.
+- **Double-entry ledger with DB-enforced invariants** — balances move only through balanced postings; a deferred constraint trigger enforces zero-sum per transaction and a non-negative `CHECK` makes "insufficient funds" races safe without optimistic retries. Every credit and settlement carries an idempotency key.
+- **Race-safe settlement & cash-out** — market settlement, rocket cash-out vs. crash, and withdrawals use `SELECT … FOR UPDATE` row locks plus status guards, so a bet can't be paid twice and a round can't both cash out and bust.
+- **Integer-only money** — amounts are integer nano-TON (no floats); payout math runs in `big.Int` with an overflow guard.
+- **Deposits credit the real amount** — TON by on-chain value matched to a per-user memo (idempotent by tx hash); Stars valued at a live, staleness-guarded rate.
+- **Defense in depth** — parameterized SQL throughout (no injection), capped request bodies, a bounded connection pool, secrets only from the environment and scrubbed from logs, and a locked-down CSP on the web app.
+
 ## Tests & CI
 
 - **Go:** `go test ./...` covers the ledger invariants, bet lifecycle (win / lose / void, the one-bet rule), withdrawals and each game's fairness/RTP math. `go vet` + `gofmt` are clean.

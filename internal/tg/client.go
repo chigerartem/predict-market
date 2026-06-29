@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -88,7 +89,8 @@ func (c *Client) call(ctx context.Context, method string, body any, out any) err
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return err
+		// Scrub the bot token: a *url.Error from Do embeds the request URL (token in path).
+		return fmt.Errorf("tg: %s request failed: %s", method, strings.ReplaceAll(err.Error(), c.token, "***"))
 	}
 	defer resp.Body.Close()
 

@@ -72,6 +72,9 @@ func (s *Store) Config() Config { return s.cfg }
 func payoutNano(stakeNano, multMilli int64) int64 {
 	p := new(big.Int).Mul(big.NewInt(stakeNano), big.NewInt(multMilli))
 	p.Quo(p, big.NewInt(1000))
+	if !p.IsInt64() {
+		return 0 // overflow guard (balance-gated; unreachable in practice)
+	}
 	return p.Int64()
 }
 

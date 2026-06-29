@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -152,7 +153,10 @@ func (s *Server) authenticate(r *http.Request) (int64, error) {
 			return u.ID, nil
 		}
 	}
-	if s.devUserID > 0 {
+	// Dev fallback is honored ONLY when no bot token is configured (local/testing).
+	// With a real token (prod) it is ignored, so a stray DEV_USER_ID in the env can
+	// never become an auth bypass.
+	if s.devUserID > 0 && s.botToken == "" {
 		if err := s.upsertUser(r.Context(), TgUser{ID: s.devUserID, FirstName: "dev"}); err != nil {
 			return 0, err
 		}
@@ -820,7 +824,10 @@ func (s *Server) handleTgWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	if s.webhookSecret != "" && r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != s.webhookSecret {
+	// Fail CLOSED: reject if no secret is configured (never silently accept) and compare
+	// in constant time. Telegram echoes this header from the secret_token set at setWebhook.
+	got := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
+	if s.webhookSecret == "" || !hmac.Equal([]byte(got), []byte(s.webhookSecret)) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -869,6 +876,9 @@ func (s *Server) cors(next http.Handler) http.Handler {
 		origin = "*"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Cap request bodies: every payload here is tiny JSON. Bounds memory and
+		// protects the unauthenticated webhook endpoint from a large-body DoS.
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")

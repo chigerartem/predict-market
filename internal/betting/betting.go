@@ -55,6 +55,9 @@ type Bet struct {
 func payoutNano(stakeNano, oddsMilli int64) int64 {
 	p := new(big.Int).Mul(big.NewInt(stakeNano), big.NewInt(oddsMilli))
 	p.Quo(p, big.NewInt(1000))
+	if !p.IsInt64() {
+		return 0 // overflow guard (balance-gated; unreachable in practice)
+	}
 	return p.Int64()
 }
 

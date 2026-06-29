@@ -64,6 +64,9 @@ func NewStore(ctx context.Context, pool *pgxpool.Pool, cfg Config) (*Store, erro
 func payoutNano(priceNano, multMilli int64) int64 {
 	p := new(big.Int).Mul(big.NewInt(priceNano), big.NewInt(multMilli))
 	p.Quo(p, big.NewInt(1000))
+	if !p.IsInt64() {
+		return 0 // overflow guard (balance-gated; unreachable in practice)
+	}
 	return p.Int64()
 }
 

@@ -16,6 +16,10 @@ import (
 const (
 	coingeckoURL = "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd"
 	cacheTTL     = 5 * time.Minute
+	// Past maxStale with no fresh quote we refuse to value a Stars deposit (return 0 →
+	// the credit is rejected and Telegram retries) rather than over-credit on a
+	// stale-low price during a real TON price move.
+	maxStale = 30 * time.Minute
 )
 
 // Provider caches the TON/USD price and refreshes it on demand.
@@ -50,10 +54,13 @@ func (p *Provider) TonUSD(ctx context.Context) float64 {
 
 	fresh, err := p.fetch(ctx)
 	if err != nil || fresh <= 0 {
-		if price > 0 {
-			return price // stale, but better than failing the deposit
+		if price > 0 && time.Since(fetchedAt) <= maxStale {
+			return price // recently stale — acceptable, better than failing the deposit
 		}
-		return p.fallback
+		if price == 0 {
+			return p.fallback // never fetched (cold start); fallback is conservative-high
+		}
+		return 0 // too stale to trust → caller rejects the credit
 	}
 
 	p.mu.Lock()
