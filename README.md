@@ -13,6 +13,10 @@
 [![TON](https://img.shields.io/badge/TON-Connect-0098EA?logo=ton&logoColor=white)](https://ton.org/)
 [![License](https://img.shields.io/badge/license-all%20rights%20reserved-red)](LICENSE)
 
+<video src="https://github.com/chigerartem/predict-market/raw/main/media/demo.mp4" controls width="300">
+  <a href="https://github.com/chigerartem/predict-market/raw/main/media/demo.mp4">▶️ Watch the demo</a>
+</video>
+
 </div>
 
 ---
@@ -43,9 +47,9 @@ Compose behind nginx.
 
 ## Demo
 
-Predict Market runs inside **Telegram** as a Mini App — it validates Telegram `initData`,
-so it lives in the Telegram client rather than a normal browser tab; the intended way to
-see it is a short phone-recorded walkthrough of the real experience.
+The walkthrough above is a phone screen-recording of the live Telegram Mini App. It
+validates Telegram `initData`, so it runs inside the Telegram client rather than a normal
+browser tab.
 
 For development the UI can also run against an in-browser mock backend
 ([`web/src/demo.ts`](web/src/demo.ts)) with `npm run dev -- --mode demo` — no server
