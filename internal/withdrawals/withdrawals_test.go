@@ -14,7 +14,7 @@ import (
 )
 
 // A valid mainnet address (non-bounceable user form) for request validation.
-const testAddr = "UQAFkMtsAYcZqfMG1ESQ-IPXjjp4nVtFM3WCfghqfL3vXIfg"
+const testAddr = "UQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJKZ"
 
 var pool *pgxpool.Pool
 
