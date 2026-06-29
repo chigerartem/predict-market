@@ -2,13 +2,8 @@
 
 <h1>Predict Market</h1>
 
-**A Telegram Mini App prediction market on real-world events (Polymarket odds, auto-settled) plus four provably-fair instant games — full-stack React + Go, with a live in-browser demo.**
+**A Telegram Mini App prediction market on real-world events (Polymarket odds, auto-settled) plus four provably-fair instant games — full-stack React + Go + PostgreSQL.**
 
-**▶️ Live demo:** https://chigerartem.github.io/predict-market/
-
-<sub>The hosted demo runs entirely client-side on mock data (no backend) — full stack details below.</sub>
-
-[![Live demo](https://img.shields.io/badge/live_demo-online-22c55e?logo=githubpages&logoColor=white)](https://chigerartem.github.io/predict-market/)
 [![CI](https://github.com/chigerartem/predict-market/actions/workflows/ci.yml/badge.svg)](https://github.com/chigerartem/predict-market/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
@@ -48,13 +43,13 @@ Compose behind nginx.
 
 ## Demo
 
-**▶️ https://chigerartem.github.io/predict-market/**
+Predict Market runs inside **Telegram** as a Mini App — it validates Telegram `initData`,
+so it lives in the Telegram client rather than a normal browser tab; the intended way to
+see it is a short phone-recorded walkthrough of the real experience.
 
-The hosted demo is the exact same React app built with `--mode demo`: every API call is
-served from an in-browser mock store ([`web/src/demo.ts`](web/src/demo.ts)) instead of the
-Go backend, so it needs no server and stays fully interactive — browse the market feed,
-place bets, play all four games, top up and withdraw against a mock balance. In production
-the app runs inside Telegram and talks to the Go API instead.
+For development the UI can also run against an in-browser mock backend
+([`web/src/demo.ts`](web/src/demo.ts)) with `npm run dev -- --mode demo` — no server
+needed (markets, betting, all four games and balances are simulated).
 
 ## Features
 
@@ -104,7 +99,7 @@ flowchart LR
 | Real-time    | Server-Sent Events (rocket round stream) |
 | Payments     | TON (`tonutils-go`, TON Connect), Telegram Stars (Bot API invoices) |
 | Auth         | Telegram Mini App `initData` (HMAC-SHA256) |
-| Ops          | Docker Compose, nginx (SPA + gzip + immutable asset cache), GitHub Actions (CI + Pages) |
+| Ops          | Docker Compose, nginx (SPA + gzip + immutable asset cache), GitHub Actions (CI) |
 
 ## Project structure
 
@@ -130,24 +125,21 @@ flowchart LR
 
 ## Quick start
 
-### 1. Just look — the live demo
-**https://chigerartem.github.io/predict-market/** — no setup, runs on mock data in the browser.
-
-### 2. Run the demo locally
+### 1. Run the UI without a backend (mock mode)
 ```bash
 cd web
 npm install
-npm run dev -- --mode demo      # http://localhost:5173/predict-market/
+npm run dev -- --mode demo      # mock backend in src/demo.ts, no server needed
 ```
 
-### 3. Run the backend (Go API + Postgres)
+### 2. Run the backend (Go API + Postgres)
 ```bash
 cp .env.example .env             # set DATABASE_URL, TG_BOT_TOKEN, …
 docker compose up -d             # Postgres on :55432
 go run ./cmd/api                 # API on :8000 (DEV_USER_ID=1 to skip Telegram auth)
 ```
 
-### 4. Run the frontend against that API
+### 3. Run the frontend against that API
 ```bash
 cd web
 npm install
@@ -159,8 +151,7 @@ VITE_API_BASE=http://localhost:8000 npm run dev
 Backend config is read from the environment (see [`.env.example`](.env.example)) — bot
 token, `DATABASE_URL`, the Stars→TON rate buffer, the TON deposit address and the
 (optional) hot-wallet mnemonic that enables withdrawals. The frontend takes `VITE_API_BASE`
-at build time; `--mode demo` flips it to the in-browser mock and serves under
-`/predict-market/`.
+at build time; `--mode demo` swaps the backend for the in-browser mock (`src/demo.ts`).
 
 ## Provably fair
 
@@ -174,7 +165,7 @@ need this — they settle from public Polymarket results.
 
 - **Go:** `go test ./...` covers the ledger invariants, bet lifecycle (win / lose / void, the one-bet rule), withdrawals and each game's fairness/RTP math. `go vet` + `gofmt` are clean.
 - **Web:** `npm run typecheck` (strict TS) + `npm run build`.
-- **CI:** GitHub Actions runs both on every push/PR; a separate workflow builds the demo and deploys it to GitHub Pages.
+- **CI:** GitHub Actions runs both on every push/PR.
 
 ## License
 
