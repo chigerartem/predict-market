@@ -13,9 +13,7 @@
 [![TON](https://img.shields.io/badge/TON-Connect-0098EA?logo=ton&logoColor=white)](https://ton.org/)
 [![License](https://img.shields.io/badge/license-all%20rights%20reserved-red)](LICENSE)
 
-[<img src="media/demo-poster.jpg" width="280" alt="Predict Market — live Telegram Mini App walkthrough" />](media/demo.mp4)
-
-**▶️ [Watch the 90-second walkthrough](media/demo.mp4)** <sub>(recorded in the Telegram app)</sub>
+https://github.com/user-attachments/assets/c1e893a7-4f0d-40ae-ab43-213c5202e625
 
 </div>
 
@@ -47,9 +45,9 @@ Compose behind nginx.
 
 ## Demo
 
-The clip above (click the thumbnail to play) is a phone screen-recording of the live
-Telegram Mini App. It validates Telegram `initData`, so it runs inside the Telegram client
-rather than a normal browser tab.
+The clip above is a phone screen-recording of the live Telegram Mini App. It validates
+Telegram `initData`, so it runs inside the Telegram client rather than a normal browser
+tab.
 
 For development the UI can also run against an in-browser mock backend
 ([`web/src/demo.ts`](web/src/demo.ts)) with `npm run dev -- --mode demo` — no server
