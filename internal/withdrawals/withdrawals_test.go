@@ -41,7 +41,7 @@ func reset(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	for _, q := range []string{
-		`TRUNCATE withdrawals, ledger_entries, ledger_transactions RESTART IDENTITY`,
+		`TRUNCATE withdrawals, ledger_entries, ledger_transactions RESTART IDENTITY CASCADE`,
 		`DELETE FROM accounts WHERE owner_user_id IS NOT NULL`,
 		`DELETE FROM users`,
 		`UPDATE accounts SET balance_nano = 0`,
