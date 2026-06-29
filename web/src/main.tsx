@@ -6,11 +6,21 @@ import App from "./App";
 import { installTapHaptics } from "./haptics";
 import "./index.css";
 
+// Demo build (GitHub Pages): render inside an iPhone-sized frame (see .demo-frame in
+// index.css) so the Mini App shows at its real mobile width instead of stretching
+// across a desktop screen. telegram-web-app.js defines window.Telegram.WebApp even in a
+// plain browser, so in demo we also skip the TG branch below (it would set --app-h to
+// the full window height and defeat the frame) — .demo-frame's CSS drives the height.
+const DEMO_BUILD = import.meta.env.VITE_DEMO === "true";
+if (DEMO_BUILD) {
+  document.documentElement.classList.add("demo-frame");
+}
+
 // Манифест отдаётся nginx из web/public. URL абсолютный — его читает кошелёк (внешнее
 // приложение), а не только наш фронт.
 const TONCONNECT_MANIFEST = "https://market.kopix.online/tonconnect-manifest.json";
 
-if (window.Telegram?.WebApp) {
+if (!DEMO_BUILD && window.Telegram?.WebApp) {
   const tg = window.Telegram.WebApp;
   tg.ready();
   tg.expand();

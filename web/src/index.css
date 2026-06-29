@@ -12,6 +12,41 @@ html, body, #root {
   height: var(--app-h, 100dvh);
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Demo build only (VITE_DEMO, class added in main.tsx). The app is a Telegram
+   Mini App sized for a phone, so on a desktop browser (GitHub Pages) we render it
+   inside an iPhone 13 Pro Max frame (428×926) centred on a backdrop — otherwise it
+   stretches full-width and nothing lines up. BODY *is* the device: overflow-clipped
+   and transformed, so it becomes the containing block for the fixed bottom-nav AND
+   for the bottom-sheets that portal into <body> — both stay inside the frame. On a
+   real phone (≤480px) it fills the screen with no bezel.
+   ───────────────────────────────────────────────────────────────────────── */
+html.demo-frame {
+  --app-h: min(926px, 100dvh);
+  height: 100dvh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: radial-gradient(900px 650px at 50% -10%, #18202e 0%, #080a0f 62%);
+}
+html.demo-frame body {
+  width: min(428px, 100vw);
+  height: var(--app-h);
+  overflow: hidden;
+  position: relative;
+  transform: translateZ(0);
+  border-radius: 46px;
+  box-shadow: 0 0 0 10px #0d0f13, 0 0 0 12px #2b2f39, 0 35px 90px -20px rgba(0, 0, 0, 0.75);
+}
+html.demo-frame #root {
+  width: 100%;
+  height: 100%;
+}
+@media (max-width: 480px) {
+  html.demo-frame { background: #0A0E16; }
+  html.demo-frame body { width: 100vw; height: 100dvh; border-radius: 0; box-shadow: none; }
+}
+
 html {
   /* pan-x pan-y (а НЕ manipulation!) — manipulation разрешает pinch-zoom; этот
      набор разрешает только панорамирование и блокирует и pinch-, и double-tap-зум. */
