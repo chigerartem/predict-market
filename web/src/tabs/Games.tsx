@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useT, type TKey } from "../i18n";
+import { asset } from "../assets";
 import Lottie from "../components/Lottie";
 import RocketGame from "./RocketGame";
 import DiceGame from "./DiceGame";
@@ -80,7 +81,7 @@ type FallItem = { src: string; style: CSSProperties };
 
 // PNG (а не SVG): декодируются мгновенно → нет лага при первом заходе на Games
 // (сложный SVG тыквы парсился/растеризовался на лету и тормозил переключение вкладки).
-const SRCS = ["/emoji/pumpkin.png", "/emoji/cat.png"];
+const SRCS = [asset("emoji/pumpkin.png"), asset("emoji/cat.png")];
 const NCOLS = COLS + 1; // +1 колонка → крайние эмодзи «утекают» за края (обрезаются)
 
 const FALL_LAYER: FallItem[] = Array.from({ length: NCOLS * PER_COL }, (_, n) => {

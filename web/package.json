@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@ton/core": "^0.63.1",
+    "@ton/crypto": "^3.3.0",
     "@tonconnect/ui-react": "^3.0.0",
     "buffer": "^6.0.3",
     "lottie-web": "^5.13.0",

@@ -7,8 +7,12 @@ import react from "@vitejs/plugin-react";
 //     (в т.ч. про экономику/атрибуцию) не читается в консоли браузера;
 //   • drop console/debugger — отладочные логи не попадают в прод-бандл.
 // В dev (command === "serve") всё остаётся — отладка не страдает.
-export default defineConfig(({ command }) => ({
+export default defineConfig(({ command, mode }) => ({
   plugins: [react()],
+  // `--mode demo` (loads .env.demo → VITE_DEMO=true) builds the GitHub Pages demo:
+  // it serves under /predict-market/ and routes the API to the in-browser mock.
+  // Prod (Telegram Mini App on market.kopix.online) serves at root, real backend.
+  base: mode === "demo" ? "/predict-market/" : "/",
   // @ton/core (сборка memo-коммента для TON-депозита) и часть TON Connect ссылаются на
   // Node-овский `global`; в браузере его нет → маппим на globalThis. Buffer ставит
   // src/polyfills.ts. Без этого сборка проходит, но падает в рантайме «global is not defined».

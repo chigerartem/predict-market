@@ -6,6 +6,7 @@ import { useT, type TKey, type TFunc } from "../i18n";
 import BottomSheet from "./BottomSheet";
 import Lottie from "./Lottie";
 import TonIcon from "./TonIcon";
+import { DEMO, dDeposit } from "../demo";
 
 type Method = "ton" | "stars";
 type Props = { open: boolean; onClose: () => void; onSuccess?: () => void };
@@ -42,6 +43,10 @@ export default function DepositModal({ open, onClose, onSuccess }: Props) {
   }, [open]);
 
   const active = METHODS.find((m) => m.id === method);
+
+  // Demo build: deposits are an instant mock (no TON Connect / Stars invoice in a
+  // plain browser). See DemoTopUp below.
+  if (DEMO) return <DemoTopUp open={open} onClose={onClose} onSuccess={onSuccess} t={t} />;
 
   return (
     <BottomSheet open={open} onClose={onClose}>
@@ -91,6 +96,48 @@ export default function DepositModal({ open, onClose, onSuccess }: Props) {
         ) : (
           <TonDeposit t={t} onBack={() => setMethod(null)} onClose={onClose} onSuccess={onSuccess} />
         )}
+      </div>
+    </BottomSheet>
+  );
+}
+
+// Demo top-up — credits the mock balance instantly (demo build only).
+const DEMO_TON_PRESETS = [10, 50, 100, 500];
+function DemoTopUp({ open, onClose, onSuccess, t }: { open: boolean; onClose: () => void; onSuccess?: () => void; t: TFunc }) {
+  const [amount, setAmount] = useState("100");
+  const n = Number(amount) || 0;
+  const topUp = () => {
+    if (n <= 0) return;
+    dDeposit(Math.round(n * 1_000_000_000));
+    onSuccess?.();
+    onClose();
+  };
+  return (
+    <BottomSheet open={open} onClose={onClose}>
+      <div>
+        <div className="mb-1 flex items-center justify-between">
+          <div className="text-lg font-bold">{t("dep.title")}</div>
+          <button onClick={onClose} aria-label={t("common.close")} className="grid h-8 w-8 place-items-center rounded-full text-neutral-400 hover:bg-white/5">
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <p className="mb-4 text-sm text-neutral-400">Demo mode — top up instantly, no real payment.</p>
+        <div className="mb-3 grid grid-cols-4 gap-2">
+          {DEMO_TON_PRESETS.map((p) => (
+            <button key={p} onClick={() => setAmount(String(p))}
+              className={"rounded-xl border py-2 text-sm font-semibold tabular-nums transition active:scale-95 " + (n === p ? "border-sky-400 bg-sky-400/15 text-sky-300" : "border-white/10 bg-white/[0.04] text-neutral-200 hover:bg-white/[0.08]")}>{p}</button>
+          ))}
+        </div>
+        <div className="mb-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3.5">
+          <TonIcon size={18} />
+          <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))}
+            className="min-w-0 flex-1 bg-transparent py-3.5 text-base tabular-nums outline-none placeholder:text-neutral-600" placeholder="0.0" />
+          <span className="text-sm font-medium text-neutral-500">TON</span>
+        </div>
+        <button onClick={topUp} disabled={n <= 0}
+          className="w-full rounded-2xl bg-gradient-to-r from-sky-400 to-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-sky-500/30 transition active:scale-[0.99] enabled:hover:brightness-110 disabled:opacity-40">
+          {t("dep.tonPay")} {n} TON
+        </button>
       </div>
     </BottomSheet>
   );

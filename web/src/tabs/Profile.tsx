@@ -6,6 +6,7 @@ import { fmtTon } from "../format";
 import UserAvatar, { tgHandle } from "../components/UserAvatar";
 import TonIcon from "../components/TonIcon";
 import { useT } from "../i18n";
+import { asset } from "../assets";
 
 // Маска Бэтмена (public/lottie/batman-mask.json) поверх аватара: въезжает сверху,
 // садится на лицо, по тапу отъезжает вбок на ~2с.
@@ -51,7 +52,7 @@ export default function Profile({ me, active }: { me: MeResponse; active: boolea
       renderer: "svg",
       loop: true,
       autoplay: false,
-      path: "/lottie/batman-mask.json",
+      path: asset("lottie/batman-mask.json"),
     });
     maskAnim.current = anim;
     return () => {

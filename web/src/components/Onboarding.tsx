@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import lottie from "lottie-web";
 import { useT, type TKey } from "../i18n";
+import { asset } from "../assets";
 
 // Онбординг Mini App: 4 свайпаемых слайда при ПЕРВОМ входе. Показывается один
 // раз — гейт в App.tsx (серверный user.onboarded + localStorage). Компонент
@@ -47,7 +48,7 @@ function LottieArt({ src }: { src: string }) {
       renderer: "svg",
       loop: true,
       autoplay: true,
-      path: src,
+      path: asset(src),
     });
     return () => anim.destroy();
   }, [src]);

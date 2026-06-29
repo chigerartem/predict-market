@@ -1,3 +1,5 @@
+import { asset } from "./assets";
+
 // Кэш РАЗОБРАННЫХ lottie-данных. Тяжёлые анимации (кубики покоя ~300KB) при открытии
 // экрана грузятся файлом асинхронно → их сначала НЕТ, потом они «появляются»/мерцают.
 // Префетчим JSON при старте, парсим и держим объект в памяти; экран кубиков берёт его
@@ -10,7 +12,7 @@ const inflight = new Set<string>();
 export function prefetchLottie(name: string): void {
   if (cache.has(name) || inflight.has(name)) return;
   inflight.add(name);
-  fetch(`/lottie/${name}.json`)
+  fetch(asset(`lottie/${name}.json`))
     .then((r) => r.json())
     .then((d) => { cache.set(name, d as object); })
     .catch(() => { /* не критично — упадёт на обычную загрузку по path */ })

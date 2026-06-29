@@ -11,6 +11,7 @@ import Profile from "./tabs/Profile";
 import Onboarding from "./components/Onboarding";
 import PixelGround from "./components/PixelGround";
 import { useT, type TKey } from "./i18n";
+import { asset } from "./assets";
 import { prefetchLottie } from "./lottieCache";
 
 type Tab = "home" | "bets" | "games" | "profile";
@@ -205,7 +206,7 @@ export default function App() {
   // кэша браузера мгновенно, а не грузит JSON заново.
   useEffect(() => {
     for (const f of ["onb-predict", "onb-calc", "onb-connect", "onb-start", "money", "batman-mask", "gift", "star", "rocket", "gift-bee", "gift-corgi", "gift-capybara"]) {
-      fetch(`/lottie/${f}.json`).catch(() => {});
+      fetch(asset(`lottie/${f}.json`)).catch(() => {});
     }
     // Грани покоя кубиков (dice-1, dice-6) — парсим и кэшируем как animationData, чтобы
     // при входе в Кости они стояли МГНОВЕННО (без подгрузки/мерцания). Грани броска
@@ -221,7 +222,7 @@ export default function App() {
     // на вкладку не тормозил на декоде сотен тайлов.
     for (const f of ["pumpkin", "cat"]) {
       const img = new Image();
-      img.src = `/emoji/${f}.png`;
+      img.src = asset(`emoji/${f}.png`);
       img.decode?.().catch(() => {});
     }
   }, []);

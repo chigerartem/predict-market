@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { fetchMe, rocketBet, rocketCashout, rocketStreamUrl, type RocketState } from "../realapi";
+import { fetchMe, rocketBet, rocketCashout, createRocketSource, type RocketState } from "../realapi";
 import { fmtTon } from "../format";
 import { useT } from "../i18n";
 import Lottie from "../components/Lottie";
@@ -250,7 +250,7 @@ export default function RocketGame({ onClose }: { onClose: () => void }) {
 
     const connect = () => {
       es?.close();
-      es = new EventSource(rocketStreamUrl());
+      es = createRocketSource();
       es.onmessage = (e) => {
         lastMsg = performance.now();
         try {

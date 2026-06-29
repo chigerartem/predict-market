@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import lottie from "lottie-web";
+import { asset } from "../assets";
 
 // Тонкая обёртка над lottie-web: грузит JSON-анимацию из /public/lottie и крутит её.
 // Переиспользуется в модалках и героях (money.json, onb-*.json). Размер задаётся
@@ -49,7 +50,7 @@ export default function Lottie({
     // сразу. Иначе грузим по path (асинхронно).
     const anim = animationData
       ? lottie.loadAnimation({ container: el, renderer: "svg", loop, autoplay, animationData })
-      : lottie.loadAnimation({ container: el, renderer: "svg", loop, autoplay, path: src });
+      : lottie.loadAnimation({ container: el, renderer: "svg", loop, autoplay, path: asset(src) });
     if (speed !== 1) anim.setSpeed(speed);
     const handleComplete = () => cbRef.current?.();
     anim.addEventListener("complete", handleComplete);
